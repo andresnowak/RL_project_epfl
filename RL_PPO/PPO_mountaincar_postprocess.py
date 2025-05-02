@@ -10,7 +10,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from PPO_mountaincar import ActorNetwork, PPO
 
-visualize = False
+visualize = True
 if visualize:
     render_mode = "human"
 else:
@@ -22,7 +22,7 @@ agent2 = PPO(n_actions=env.action_space.n, input_dims=env.observation_space.shap
 agent2.load_models("RL_PPO/model/half_actor_model")
 
 if visualize:
-    n_try = 1
+    n_try = 10
     for _ in range(n_try):
         state, _ = env.reset()
         for _ in range(500):
