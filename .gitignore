@@ -2,9 +2,9 @@
 __pycache__
 build
 *_logs
-*.csv
 *_tensorboard
 *.egg*
 *.pkl
 *logs
 .DS_Store
+ppo_mountain_car_continuous
