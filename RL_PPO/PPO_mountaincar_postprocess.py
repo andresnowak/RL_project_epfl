@@ -35,36 +35,3 @@ if visualize:
                 break
 
     env.close()
-
-# generate trajectory
-K = 30
-trajectory_buffer = []
-trajectory = []  # [(t_1,t_2)_1,...,(t_1,t_2)_K]
-reward_buffer = []  # [(R_1,R_2)_1,...,(R_1,R_2)_K]
-
-for k in range(K):
-    # agent1
-    state, _ = env.reset()
-    done = False
-    cum_reward1 = 0
-    cum_reward2 = 0
-    while not done:
-        action, probs, value = agent1.choose_action(state)
-        state_, reward, terminated, truncated, _ = env.step(action)
-        state = state_
-        cum_reward1 += reward
-        done = terminated
-
-    # agent2
-    state, _ = env.reset()
-    done = False
-
-    while not done:
-        action, probs, value = agent2.choose_action(state)
-        state_, reward, terminated, truncated, _ = env.step(action)
-        state = state_
-        cum_reward2 += reward
-        done = terminated
-
-    reward_buffer.append([cum_reward1, cum_reward2])
-print(reward_buffer)

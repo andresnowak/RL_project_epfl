@@ -7,8 +7,13 @@ from torch.distributions.categorical import Categorical
 import gym
 from itertools import count
 from torch.utils.data import BatchSampler, SubsetRandomSampler
-from RL_PPO.utils import plot_learning_curve
+
 from copy import deepcopy
+
+if __name__ == "__main__":
+    from utils import plot_learning_curve
+else:
+    from RL_PPO.utils import plot_learning_curve
 
 
 class PPOMemory:

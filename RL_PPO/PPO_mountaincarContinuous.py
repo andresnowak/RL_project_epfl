@@ -283,7 +283,7 @@ if __name__ == "__main__":
             state_, reward, done, truncated, _ = env.step(action)
             state = state_
             env.render()
-            if done or truncated:
+            if done:
                 break
 
     env.close()
