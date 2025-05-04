@@ -92,6 +92,22 @@ class ActorNetwork(nn.Module):
         self.optimizer = optim.Adam(self.parameters(), lr=alpha)
         self.device = device
         self.to(self.device)
+    
+        self._initialize_weights()
+
+    def _initialize_weights(self):
+        # Initialize layers within the sequential 'features' part
+        for layer in self.actor:
+            if isinstance(layer, nn.Linear):
+                # Use gain=sqrt(2) for layers followed by ReLU
+                torch.nn.init.orthogonal_(layer.weight, gain=torch.nn.init.calculate_gain("relu"))
+                torch.nn.init.constant_(layer.bias, 0)
+
+        # Initialize output layers (mu and sigma) with specific gains
+        torch.nn.init.orthogonal_(self.mu.weight, gain=0.01)
+        torch.nn.init.constant_(self.mu.bias, 0)
+        torch.nn.init.orthogonal_(self.sigma.weight, gain=0.01)
+        torch.nn.init.constant_(self.sigma.bias, 0)
 
     def forward(self, state):
         x = self.actor(state)  # tensor([[1.]], grad_fn=<SoftmaxBackward0>)
@@ -130,6 +146,18 @@ class CriticNetwork(nn.Module):
         self.optimizer = optim.Adam(self.parameters(), lr=alpha)
         self.device = device
         self.to(self.device)
+
+        self._initialize_weights()
+
+    def _initialize_weights(self):
+        # Initialize layers within the sequential 'features' part
+        for layer in self.critic:
+            if isinstance(layer, nn.Linear):
+                # Use gain=sqrt(2) for layers followed by ReLU
+                torch.nn.init.orthogonal_(
+                    layer.weight, gain=torch.nn.init.calculate_gain("relu")
+                )
+                torch.nn.init.constant_(layer.bias, 0)
 
     def forward(self, state):
         value = self.critic(state)
@@ -246,6 +274,8 @@ class PPO:
 
     def collect_rollout(self, rollout_steps=2048):
         obs = self.env.reset()[0]
+        last_value = 0
+    
         for _ in range(rollout_steps):
             obs_tensor = torch.tensor(obs, dtype=torch.float32).to(self.device)
             with torch.no_grad():
@@ -268,10 +298,19 @@ class PPO:
 
             if done:
                 obs = self.env.reset()[0]
+                last_value = 0
             else:
                 obs = next_obs
+                if _ == rollout_steps - 1:
+                    with torch.no_grad():
+                        obs_tensor = torch.tensor(obs, dtype=torch.float32).to(self.device)
+                        last_value = self.critic(obs_tensor).item()
 
-    def compute_gae(self, gamma=0.99, lam=0.95):
+
+        # Return the last value for GAE bootstrapping
+        return last_value
+
+    def compute_gae(self, last_value, gamma=0.99, lam=0.95):
         state_arr, action_arr, old_prob_arr, vals_arr, reward_arr, dones_arr = (
             self.memory.get_memory()
         )
@@ -279,7 +318,7 @@ class PPO:
         gae = 0
         values = np.zeros(len(reward_arr) + 1)
         values[:-1] = vals_arr
-        values[-1] = 0
+        values[-1] = last_value # last value for bootstrapping
 
         for t in reversed(range(len(reward_arr))):
             delta = reward_arr[t] + gamma * values[t+1] * (1 - dones_arr[t]) - values[t]
@@ -294,14 +333,14 @@ class PPO:
         return advantages, returns
 
 
-    def _learn(self):
+    def _learn(self, last_value):
         n_learning = 0
         state_arr, action_arr, old_prob_arr, vals_arr, reward_arr, dones_arr = (
             self.memory.get_memory()
         )
         values = vals_arr.astype(np.float32)
 
-        advantage, returns_ = self.compute_gae(self.gamma, self.gae_lambda)
+        advantage, returns_ = self.compute_gae(last_value, self.gamma, self.gae_lambda)
 
         values = torch.tensor(values).to(self.device)
 
@@ -337,8 +376,9 @@ class PPO:
                 actor_loss = -torch.min(weighted_probs, weighted_clipped_probs).mean()
 
                 returns = advantage[batch] + values[batch]
-                critic_loss = (returns - critic_value) ** 2
-                critic_loss = critic_loss.mean()
+                # critic_loss = (returns - critic_value) ** 2
+                # critic_loss = critic_loss.mean()
+                critic_loss = F.mse_loss(critic_value, returns)
 
                 total_loss = actor_loss + self.vf_coef * critic_loss - self.ent_coef * entropy.mean()
         
@@ -366,7 +406,7 @@ class PPO:
 
         buffer_size = 10_000
         for i in range(num_timesteps):
-            self.collect_rollout(buffer_size)
+            last_value = self.collect_rollout(buffer_size)
 
             trajectory_scores = []
             episode_reward = 0
@@ -383,7 +423,7 @@ class PPO:
                     episode_reward = 0
                     length = 0
 
-            self._learn()
+            self._learn(last_value)
 
             score_history.append(np.mean(trajectory_scores))
             avg_score = np.mean(trajectory_scores)
