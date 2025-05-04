@@ -9,8 +9,8 @@ from src.create_env import create_env_continuous
 print("--- Running Example ---")
 
 # Define parameters based on the user request
-MODEL_PATH = "./ppo_mountain_car_continuous/20250504_155941/checkpoints/checkpoint_180000" # Use Continuous version
-MODEL_PATH_2 = "./ppo_mountain_car_continuous/20250504_155941/checkpoints/checkpoint_160000"  # Use Continuous version
+MODEL_PATH = "./ppo_mountain_car_continuous/20250504_165641/checkpoints/checkpoint_200000" # Use Continuous version
+MODEL_PATH_2 = "./ppo_mountain_car_continuous/20250504_165641/checkpoints/checkpoint_60000"  # Use Continuous version
 ENV_ID = "MountainCarContinuous-v0"
 CSV_FILE = "ppo_mountain_car_continuous_rollouts.csv"
 DIR_NAME = "ppo_mountain_car_continuous_rollouts"
@@ -19,7 +19,7 @@ DETERMINISTIC_ROLLOUT = False # Use stochastic actions for variety
 
 device = "cpu" 
 model = PPO.load(MODEL_PATH, device=device)
-model_2 = PPO.load(MODEL_PATH, device=device)
+model_2 = PPO.load(MODEL_PATH_2, device=device)
 
 print(f"Model loaded from {MODEL_PATH}")
 

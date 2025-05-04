@@ -5,6 +5,7 @@ class MountainCarContinuousRewardWrapper(gym.Wrapper):
     def __init__(self, env, gamma=0.99):
         super().__init__(env)
         self.gamma = gamma
+        self.step_number = 0
         self.prev_pos = None
         self.prev_vel = None
 
@@ -12,6 +13,8 @@ class MountainCarContinuousRewardWrapper(gym.Wrapper):
         observation, info = self.env.reset(**kwargs)
         self.prev_pos = observation[0]
         self.prev_vel = observation[1]
+        self.step_number = 0
+    
         return observation, info
 
     def potential(self, position, velocity):
@@ -32,7 +35,7 @@ class MountainCarContinuousRewardWrapper(gym.Wrapper):
         goal_reached = position >= 0.45
 
         # Original reward (only the goal part matters)
-        original_reward = 100.0 if goal_reached else 0.0
+        original_reward = 50.0 if goal_reached else 0.0
 
         # Calculate potentials for shaping
         prev_potential = self.potential(self.prev_pos, self.prev_vel)
@@ -42,9 +45,11 @@ class MountainCarContinuousRewardWrapper(gym.Wrapper):
         self.prev_pos = position
         self.prev_vel = velocity
 
+        step_reward = (1000 / self.step_number) * 15 if goal_reached else 0
+
         # Calculate shaped reward
         shaped_reward = (
-            original_reward + self.gamma * current_potential - prev_potential
+            original_reward + step_reward + self.gamma * current_potential - prev_potential
         )
 
         # We removed the default action penalty implicitly by calculating from potential
@@ -53,6 +58,8 @@ class MountainCarContinuousRewardWrapper(gym.Wrapper):
     def step(self, action):
         obs, reward, terminated, truncated, info = super().step(action)
         info["original_reward"] = reward  # Store original reward
+
+        self.step_number += 1
 
         reward = self.reward(reward, obs)
 
