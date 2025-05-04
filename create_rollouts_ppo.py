@@ -14,7 +14,7 @@ PARTIAL_MODEL_PATH = "./ppo_mountain_car_continuous/20250504_165641/checkpoints/
 ENV_ID = "MountainCarContinuous-v0"
 CSV_FILE = "ppo_mountain_car_continuous_rollouts.csv"
 DIR_NAME = "ppo_mountain_car_continuous_rollouts"
-NUM_EPISODES = 5
+NUM_EPISODES = 100
 DETERMINISTIC_ROLLOUT = False # Use stochastic actions for variety
 
 device = "cpu" 
@@ -36,7 +36,7 @@ collect_paired_demonstrations(
     full_model=model,
     env=env,
     output_dir=DIR_NAME,
-    num_episodes=5,
+    num_episodes=NUM_EPISODES,
 )
 
 env.close()
