@@ -97,7 +97,7 @@ class ActorNetwork(nn.Module):
         x = self.actor(state)  # tensor([[1.]], grad_fn=<SoftmaxBackward0>)
 
         mu = F.tanh(self.mu(x)) * self.action_bound
-        sigma = F.softplus(self.sigma(x))
+        sigma = F.softplus(self.sigma(x)) + 1e-8
 
         return mu, sigma
 
@@ -153,12 +153,16 @@ class PPO:
         policy_clip=0.2, # clip_range
         batch_size=64,
         n_epochs=10,
+        ent_coef=0.0,
+        vf_coef=0.5,
         device: str | torch.device = "auto"
     ):
         self.gamma = gamma
         self.policy_clip = policy_clip
         self.n_epochs = n_epochs
         self.gae_lambda = gae_lambda
+        self.vf_coef = vf_coef
+        self.ent_coef = ent_coef
         
         self.env = env
 
@@ -184,7 +188,7 @@ class PPO:
 
         # setup model
         self.actor = ActorNetwork(n_actions, input_dims, action_bound, alpha, device=self.device)
-        self.critic = CriticNetwork(input_dims, alpha,device=self.device)
+        self.critic = CriticNetwork(input_dims, alpha, device=self.device)
         self.memory = PPOMemory(batch_size)
 
     def remember(self, state, action, probs, vals, reward, done):
@@ -238,9 +242,7 @@ class PPO:
 
         self.actor.train() # Set back to training mode
 
-        obs = self.
-
-        return action.cpu().numpy(), obs_tensor # Return action and None state
+        return action.cpu().numpy(), None # Return action and None state
 
     def collect_rollout(self, rollout_steps=2048):
         obs = self.env.reset()[0]
@@ -258,7 +260,8 @@ class PPO:
                 action = torch.clamp(action, self.action_bound_low, self.action_bound_high)
                 log_prob = dist.log_prob(action).sum(dim=-1)
 
-            next_obs, reward, done, _, _ = self.env.step(action.cpu().numpy())
+            next_obs, reward, done, truncated, _ = self.env.step(action.cpu().numpy())
+            done = done or truncated
 
             # Store in buffer
             self.memory.store_memory(obs, action.cpu().numpy(), log_prob.cpu().numpy(), value.item(), reward, done)
@@ -302,9 +305,6 @@ class PPO:
 
         values = torch.tensor(values).to(self.device)
 
-        exploration_beta = 0
-        c1 = 0.5
-
         for _ in range(self.n_epochs):
             batches = self.memory.generate_batches()
 
@@ -317,6 +317,7 @@ class PPO:
                 actions = torch.tensor(action_arr[batch]).to(self.actor.device)
 
                 mu, sigma = self.actor(states)
+
                 dist = Normal(mu, sigma)
                 entropy = dist.entropy().sum(dim=-1)
                 critic_value = self.critic(states)
@@ -338,12 +339,16 @@ class PPO:
                 critic_loss = (returns - critic_value) ** 2
                 critic_loss = critic_loss.mean()
 
-                total_loss = actor_loss + c1 * critic_loss - exploration_beta * entropy.mean()
+                total_loss = actor_loss + self.vf_coef * critic_loss - self.ent_coef * entropy.mean()
         
                 self.actor.optimizer.zero_grad()
                 self.critic.optimizer.zero_grad()
     
                 total_loss.backward()
+                # clip the gradients like in SB3
+                torch.nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=0.5)
+                torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=0.5)
+    
                 self.actor.optimizer.step()
                 self.critic.optimizer.step()
         # print("total learning iter: ", n_learning)
@@ -358,15 +363,29 @@ class PPO:
         n_steps = 0
         seed = 1
 
-        buffer_size = 20_000
+        buffer_size = 10_000
         for i in range(num_timesteps):
             self.collect_rollout(buffer_size)
-            score = sum(self.memory.rewards)
+
+            trajectory_scores = []
+            episode_reward = 0
+            trajectory_length = []
+            length = 0
+
+            for reward, done in zip(self.memory.rewards, self.memory.dones):
+                episode_reward += reward
+                length += 1
+
+                if done:
+                    trajectory_scores.append(episode_reward)
+                    trajectory_length.append(length)
+                    episode_reward = 0
+                    length = 0
 
             self._learn()
 
-            score_history.append(score)
-            avg_score = np.mean(score_history[-100:])
+            score_history.append(np.mean(trajectory_scores))
+            avg_score = np.mean(trajectory_scores)
 
             model_history.append(deepcopy(self.actor.state_dict()))
     
@@ -377,12 +396,13 @@ class PPO:
             print(
                 "episode",
                 i,
-                "score %.1f" % score,
                 "avg score %.1f" % avg_score,
                 "time_steps",
                 n_steps,
                 "learning_steps",
                 learn_iters,
+                "average_length",
+                np.mean(trajectory_length)
             )
         x = [i + 1 for i in range(len(score_history))]
 
