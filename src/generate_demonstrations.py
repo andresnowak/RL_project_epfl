@@ -10,7 +10,13 @@ def softmax(r1: np.float32, r2: np.float32) -> np.float32:
     """Bradley Terry model specifically for PPO"""
     # reward for best trajectory model, reward for the partial trajectory model
     # this returns the probability of the best model being chosen
-    return np.exp(r1) / (np.exp(r1) + np.exp(r2))
+
+    # Numerical stability: subtract max to avoid overflow
+    max_r = max(r1, r2)
+    exp_r1 = np.exp(r1 - max_r)
+    exp_r2 = np.exp(r2 - max_r)
+
+    return exp_r1 / (exp_r1 + exp_r2)
 
 
 def _flatten_data(data: Any, prefix: str) -> Dict[str, Any]:
@@ -219,19 +225,32 @@ def create_paired_demonstrations(trajectories_df: Dict[str, pd.DataFrame]) -> pd
  
     unique_ids = trajectories_df[model_names[0]]["episode_id"].unique()
 
+    # Pre-compute all returns for batch normalization
+    all_returns = []
+    for model_name in model_names:
+        returns = trajectories_df[model_name].groupby("episode_id")["return"].last()
+        all_returns.append(returns.values)
+    
+    # Batch normalization (Z-score across all returns)
+    all_returns = np.concatenate(all_returns)
+    mean, std = np.mean(all_returns), np.std(all_returns) + 1e-8
+    normalized_returns = [(r - mean)/std for r in all_returns]
+    
+    # Split back into models
+    split_idx = len(normalized_returns) // 2
+    model_returns = {
+        model_names[0]: normalized_returns[:split_idx],
+        model_names[1]: normalized_returns[split_idx:]
+    }
+
     # return is the same in each part, it is the total reward obtained in that trajectory
     chosen_models = []
     for id in unique_ids:
-        first_model_df = trajectories_df[model_names[0]]
-        second_model_df = trajectories_df[model_names[1]]
-
-        first_last_reward = first_model_df[first_model_df["episode_id"] == id][["return"]].iloc[-1]
-        second_last_reward = second_model_df[second_model_df["episode_id"] == id][
-            ["return"]
-        ].iloc[-1]
-
-        chosen_model = np.random.binomial(1, softmax(first_last_reward, second_last_reward))[0]
-        chosen_models.append(chosen_model)
+        r1 = model_returns[model_names[0]][id]
+        r2 = model_returns[model_names[1]][id]
+        chosen_models.append(
+            np.random.binomial(1, softmax(r1, r2))
+        )
 
 
     pairs_df = {"traj1_id": unique_ids, "traj2_id": unique_ids, "chosen_one": chosen_models}
