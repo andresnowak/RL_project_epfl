@@ -6,3 +6,5 @@ build
 *_tensorboard
 *.egg*
 *.pkl
+*logs
+.DS_Store

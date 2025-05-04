@@ -1,12 +1,16 @@
 import gymnasium as gym
 import pandas as pd
 import os
+import datetime
 from stable_baselines3 import PPO
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.evaluation import evaluate_policy
+
+
 from src.modified_rewards import MountainCarContinuousRewardWrapper
 from src.checkpoint_creator import CheckpointCallback
 from src.find_middle_and_best_model import find_model_by_performance
+from src.create_env import create_env_continuous
 
 
 def run(
@@ -59,21 +63,30 @@ def eval(eval_env: gym.Env, model_path):
 
 if __name__ == "__main__":
     ENV_ID = "MountainCarContinuous-v0"
-    log_dir = "./ppo_mountain_car_continuous_tensorboard/"
+    base_dir = "./ppo_mountain_car_continuous/"
+    log_dir = "logs"
     save_model_name = "ppo_mountain_car_continuous_final"
     # Setup checkpoint callback
-    checkpoint_dir = "./checkpoints/ppo_mountain_car_continuous"
+    checkpoint_dir = "checkpoints"
+    choosen_dir = "choosen_models"
+
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    base_dir = os.path.join(base_dir, timestamp)
+
+    log_dir = os.path.join(base_dir, log_dir)
+    checkpoint_dir = os.path.join(base_dir, checkpoint_dir)
+    save_model_dir = os.path.join(base_dir, save_model_name) # Directory to save the final model
+    choosen_dir = os.path.join(base_dir, choosen_dir)
 
     os.makedirs(checkpoint_dir, exist_ok=True)
     os.makedirs(log_dir, exist_ok=True)
+    os.makedirs(choosen_dir, exist_ok=True)
 
-    env = gym.make(ENV_ID)
-    env = MountainCarContinuousRewardWrapper(env)
+    env = create_env_continuous(ENV_ID)
     env = Monitor(env, log_dir)
 
     # Create eval environment for checkpoints
-    eval_env = gym.make(ENV_ID)
-    eval_env = MountainCarContinuousRewardWrapper(eval_env)
+    eval_env = create_env_continuous(ENV_ID)
     eval_env = Monitor(eval_env)
 
     # Train and save checkpoints
@@ -101,3 +114,6 @@ if __name__ == "__main__":
         print("Could not find 50% performance model in checkpoints")
 
     print(results)
+
+    result_df = pd.DataFrame(results)
+    result_df.to_csv(os.path.join(choosen_dir, "choosen_model.csv"))

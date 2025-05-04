@@ -98,55 +98,55 @@ class CheckpointCallback:
         return True
 
 
-class CheckpointCallback_2:
-    def __init__(self, eval_env, save_dir, checkpoint_freq=20000, n_eval_episodes=5):
-        self.eval_env = eval_env
-        self.save_dir = save_dir
-        self.checkpoint_freq = checkpoint_freq
-        self.n_eval_episodes = n_eval_episodes
-        self.checkpoint_data = []
-        self.best_reward: float = -float("inf")
-        self.best_model_path = None
-        os.makedirs(save_dir, exist_ok=True)
+# class CheckpointCallback_2:
+#     def __init__(self, eval_env, save_dir, checkpoint_freq=20000, n_eval_episodes=5):
+#         self.eval_env = eval_env
+#         self.save_dir = save_dir
+#         self.checkpoint_freq = checkpoint_freq
+#         self.n_eval_episodes = n_eval_episodes
+#         self.checkpoint_data = []
+#         self.best_reward: float = -float("inf")
+#         self.best_model_path = None
+#         os.makedirs(save_dir, exist_ok=True)
 
-    def __call__(self, locals_, globals_):
-        step = locals_["self"].num_timesteps
-        if step % self.checkpoint_freq == 0:
-            model = locals_["self"]
+#     def __call__(self, locals_, globals_):
+#         step = locals_["self"].num_timesteps
+#         if step % self.checkpoint_freq == 0:
+#             model = locals_["self"]
 
-            # Evaluate model
-            mean_reward, _ = evaluate_policy(
-                model, self.eval_env, n_eval_episodes=self.n_eval_episodes
-            )
+#             # Evaluate model
+#             mean_reward, _ = evaluate_policy(
+#                 model, self.eval_env, n_eval_episodes=self.n_eval_episodes
+#             )
 
-            # Save checkpoint
-            model_path = os.path.join(self.save_dir, f"checkpoint_{step}")
-            model.save(model_path)
+#             # Save checkpoint
+#             model_path = os.path.join(self.save_dir, f"checkpoint_{step}")
+#             model.save(model_path)
 
-            # Track best model
-            if mean_reward > self.best_reward:
-                self.best_reward = mean_reward
-                best_path = os.path.join(self.save_dir, "best_model")
-                model.save(best_path)
-                self.best_model_path = best_path
+#             # Track best model
+#             if mean_reward > self.best_reward:
+#                 self.best_reward = mean_reward
+#                 best_path = os.path.join(self.save_dir, "best_model")
+#                 model.save(best_path)
+#                 self.best_model_path = best_path
 
-            # Record checkpoint info
-            self.checkpoint_data.append(
-                {
-                    "step": step,
-                    "model_path": model_path,
-                    "mean_reward": mean_reward,
-                    "is_best": (mean_reward == self.best_reward),
-                }
-            )
+#             # Record checkpoint info
+#             self.checkpoint_data.append(
+#                 {
+#                     "step": step,
+#                     "model_path": model_path,
+#                     "mean_reward": mean_reward,
+#                     "is_best": (mean_reward == self.best_reward),
+#                 }
+#             )
 
-            # Save to CSV
-            pd.DataFrame(self.checkpoint_data).to_csv(
-                os.path.join(self.save_dir, "checkpoint_log.csv"), index=False
-            )
+#             # Save to CSV
+#             pd.DataFrame(self.checkpoint_data).to_csv(
+#                 os.path.join(self.save_dir, "checkpoint_log.csv"), index=False
+#             )
 
-            print(
-                f"Checkpoint {step} | Mean reward: {mean_reward:.1f} | Best: {self.best_reward:.1f}"
-            )
+#             print(
+#                 f"Checkpoint {step} | Mean reward: {mean_reward:.1f} | Best: {self.best_reward:.1f}"
+#             )
 
-        return True
+#         return True

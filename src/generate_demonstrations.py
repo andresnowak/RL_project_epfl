@@ -6,6 +6,12 @@ import os
 from typing import Dict, List, Tuple, Any
 from stable_baselines3.common.base_class import BaseAlgorithm
 
+def softmax(r1: np.float32, r2: np.float32) -> np.float32:
+    """Bradley Terry model specifically for PPO"""
+    # reward for best trajectory model, reward for the partial trajectory model
+    # this returns the probability of the best model being chosen
+    return np.exp(r1) / (np.exp(r1) + np.exp(r2))
+
 
 def _flatten_data(data: Any, prefix: str) -> Dict[str, Any]:
     """Flattens numpy arrays or scalars into a dict for DataFrame rows."""
@@ -47,7 +53,7 @@ def collect_paired_demonstrations(
         full_model: The fully trained model (100% performance)
         env: Gym environment instance
         output_dir: Directory to save the collected data
-        num_episodes: Number of episodes to collect per model
+        num_episodes: Number of episodes to collect per model (number of trajectories)
         deterministic: Whether to use deterministic actions
     """
     os.makedirs(output_dir, exist_ok=True)
@@ -56,15 +62,15 @@ def collect_paired_demonstrations(
     all_trajectory_summaries = {name: [] for name in model_names}
 
     # --- Step 1: Collect trajectories and save using Pandas ---
-    global_episode_id_counter = (
-        0  # Use a global counter for unique episode IDs across models
-    )
+
+    trajectories_df = {}
 
     for model_name, model in zip(model_names, models):
         csv_path = os.path.join(output_dir, f"{model_name}_model_trajectories.csv")
         print(f"\nCollecting data from {model_name} model...")
 
         all_steps_data = []  # Accumulate all steps for this model
+        global_episode_id_counter = 0
 
         for episode in range(num_episodes):
             current_episode_id = global_episode_id_counter
@@ -82,27 +88,6 @@ def collect_paired_demonstrations(
                     )
 
                     action, _ = model.predict(th_obs, deterministic=deterministic)
-
-                    # Get log probability if available
-                    log_prob = None
-                    # Need to handle potential dict observations/actions for evaluate_actions
-                    try:
-                        if hasattr(model, "policy") and hasattr(
-                            model.policy, "evaluate_actions"
-                        ):
-                            th_action = torch.as_tensor(action).to(model.device)
-
-                            # Note: evaluate_actions might need specific formatting depending on the policy type
-                            # This assumes a standard SB3 policy structure. Adjust if needed.
-                            _, log_prob_tensor, _ = model.policy.evaluate_actions(
-                                th_obs, th_action
-                            )
-                            log_prob = (
-                                log_prob_tensor.cpu().numpy().item()
-                            )  # Assuming single value log_prob
-                    except Exception as e:
-                        # print(f"Warning: Could not get log_prob. Error: {e}")
-                        log_prob = None  # Assign None if log_prob calculation fails
 
                 # Step environment
                 # SB3 predict usually returns numpy action.
@@ -152,9 +137,6 @@ def collect_paired_demonstrations(
                     "step": step_in_episode,
                     "reward": reward,
                     "done": int(done),
-                    "log_prob": log_prob
-                    if log_prob is not None
-                    else np.nan,  # Use NaN for missing log_prob
                 }
                 # Flatten observations and actions
                 step_data.update(_flatten_data(obs, "obs"))
@@ -209,7 +191,7 @@ def collect_paired_demonstrations(
         next_obs_cols = sorted(
             [col for col in trajectory_df.columns if col.startswith("next_obs_")]
         )
-        other_cols = ["reward", "done", "log_prob", "return"]
+        other_cols = ["reward", "done", "return"]
         trajectory_df = trajectory_df[
             cols
             + obs_cols
@@ -219,98 +201,40 @@ def collect_paired_demonstrations(
             + other_cols[2:]
         ]
 
+        trajectories_df[model_name] = trajectory_df
+
         # Save to CSV
         trajectory_df.to_csv(csv_path, index=False)
         print(f"Saved trajectories for {model_name} model to {csv_path}")
 
     # --- Step 2: Create preference pairs ---
     # Pass the collected summaries to the pairing function
-    create_preference_pairs(all_trajectory_summaries, output_dir)
+    pairs_df = create_paired_demonstrations(trajectories_df)
+    pairs_df.to_csv(os.path.join(output_dir, "preference_pairs.csv"))
+    print("Saved preference pairs")
 
 
-def create_preference_pairs(
-    trajectory_summaries: Dict[str, List[Dict]],
-    output_dir: str,
-    max_pairs_per_traj: int = 5,  # Limit pairs per preferred trajectory
-):
-    """
-    Creates preference pairs using Pandas based on trajectory summaries.
+def create_paired_demonstrations(trajectories_df: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+    model_names = list(trajectories_df.keys())
+ 
+    unique_ids = trajectories_df[model_names[0]]["episode_id"].unique()
 
-    Args:
-        trajectory_summaries: Dict containing lists of episode summaries
-                              (episode_id, return, length) for each model.
-        output_dir: Directory to save the preference pairs CSV.
-        max_pairs_per_traj: Maximum number of lower-return trajectories to pair
-                            with each higher-return trajectory.
-    """
-    all_summaries_list = []
-    for model_name, summaries in trajectory_summaries.items():
-        for summary in summaries:
-            all_summaries_list.append(
-                {
-                    "model": model_name,
-                    "episode_id": summary["episode_id"],
-                    "return": summary["return"],
-                    "length": summary["length"],
-                }
-            )
+    # return is the same in each part, it is the total reward obtained in that trajectory
+    chosen_models = []
+    for id in unique_ids:
+        first_model_df = trajectories_df[model_names[0]]
+        second_model_df = trajectories_df[model_names[1]]
 
-    if not all_summaries_list:
-        print("No trajectory summaries found. Cannot create preference pairs.")
-        return
+        first_last_reward = first_model_df[first_model_df["episode_id"] == id][["return"]].iloc[-1]
+        second_last_reward = second_model_df[second_model_df["episode_id"] == id][
+            ["return"]
+        ].iloc[-1]
 
-    # Create a DataFrame from the summaries
-    summary_df = pd.DataFrame(all_summaries_list)
+        chosen_model = np.random.binomial(1, softmax(first_last_reward, second_last_reward))[0]
+        chosen_models.append(chosen_model)
 
-    # Sort by return (higher is better)
-    summary_df = summary_df.sort_values(by="return", ascending=False).reset_index(
-        drop=True
-    )
 
-    preference_pairs = []
-    num_trajectories = len(summary_df)
-
-    # Iterate through sorted trajectories to create pairs
-    for i in range(num_trajectories):
-        preferred_traj = summary_df.iloc[i]
-        pairs_count_for_this_traj = 0
-        # Compare with subsequent (lower return) trajectories
-        for j in range(i + 1, num_trajectories):
-            if pairs_count_for_this_traj >= max_pairs_per_traj:
-                break  # Stop if we've made enough pairs for this preferred trajectory
-
-            rejected_traj = summary_df.iloc[j]
-
-            # Ensure there's a positive return difference
-            return_diff = preferred_traj["return"] - rejected_traj["return"]
-            if return_diff > 0:  # Strictly prefer higher return
-                preference_pairs.append(
-                    {
-                        "preferred_episode_id": preferred_traj["episode_id"],
-                        "preferred_model": preferred_traj["model"],
-                        "preferred_return": preferred_traj["return"],
-                        "rejected_episode_id": rejected_traj["episode_id"],
-                        "rejected_model": rejected_traj["model"],
-                        "rejected_return": rejected_traj["return"],
-                        "return_diff": return_diff,
-                    }
-                )
-                pairs_count_for_this_traj += 1
-            # If return_diff is 0, we could potentially use length as a tie-breaker,
-            # but for simplicity, we only pair based on strictly better returns here.
-
-    if not preference_pairs:
-        print(
-            "Could not create any preference pairs (e.g., all returns were equal or only one trajectory)."
-        )
-        return
-
-    # Create DataFrame for pairs and save to CSV
-    pairs_df = pd.DataFrame(preference_pairs)
-    pairs_path = os.path.join(output_dir, "preference_pairs.csv")
-    pairs_df.to_csv(pairs_path, index=False)
-
-    print(
-        f"\nCreated {len(preference_pairs)} preference pairs based on trajectory returns."
-    )
-    print(f"Preference pairs saved to {pairs_path}")
+    pairs_df = {"traj1_id": unique_ids, "traj2_id": unique_ids, "chosen_one": chosen_models}
+    pairs_df = pd.DataFrame(pairs_df)
+    
+    return pairs_df
