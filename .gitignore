@@ -8,3 +8,4 @@ build
 *logs
 .DS_Store
 ppo_mountain_car_continuous
+tmp

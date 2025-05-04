@@ -319,6 +319,7 @@ class PPO:
                 mu, sigma = self.actor(states)
 
                 dist = Normal(mu, sigma)
+                
                 entropy = dist.entropy().sum(dim=-1)
                 critic_value = self.critic(states)
 
