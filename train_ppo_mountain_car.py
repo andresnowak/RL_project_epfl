@@ -49,7 +49,7 @@ if __name__ == "__main__":
 
         print("episode", i, "score %.1f" % score, "avg score %.1f" % avg_score, "time_steps", n_steps, "learning_steps", learn_iters)
     x = [i + 1 for i in range(len(score_history))]
-    plot_learning_curve(x, score_history, "checkpoints_MC/learning_curve.png")
+    plot_learning_curve(x, score_history, "checkpoints_mountain_car/learning_curve.png")
 
     env.close()
 
@@ -61,20 +61,20 @@ if __name__ == "__main__":
     best_idx = avg_score_history.index(max(avg_score_history))
     best_model = model_history[best_idx]
 
-    half_idx = min(range(len(avg_score_history)), key=lambda i: abs(avg_score_history[i] - avg_score_history[best_idx] * 3))
+    half_idx = min(range(len(avg_score_history)), key=lambda i: abs(avg_score_history[i] - avg_score_history[best_idx] * 3) + abs(score_history[i] - score_history[best_idx] * 3))
     half_model = model_history[half_idx]
 
     # save model
     print("save best model with score of", score_history[best_idx])
-    torch.save(best_model, "checkpoints_MC/best_actor_model_MC")
+    torch.save(best_model, "checkpoints_mountain_car/best_actor_model_MC")
     print("save half model with score of", score_history[half_idx])
-    torch.save(half_model, "checkpoints_MC/half_actor_model_MC")
+    torch.save(half_model, "checkpoints_mountain_car/half_actor_model_MC")
 
     # visualize the best model
 
     env = gym.make("MountainCar-v0", render_mode="human")
     agent = PPO(n_actions=env.action_space.n, input_dims=env.observation_space.shape)
-    agent.load_models("checkpoints_MC/best_actor_model_MC")
+    agent.load_models("checkpoints_mountain_car/best_actor_model_MC")
 
     n_try = 1
     for _ in range(n_try):
