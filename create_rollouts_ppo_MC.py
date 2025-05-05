@@ -10,8 +10,8 @@ from src.generate_demonstrations_MC import collect_paired_demonstrations
 print("--- Running Example ---")
 
 # Define parameters based on the user request
-MODEL_PATH = "RL_PPO/model/best_actor_model_MC"  # Use Continuous version
-PARTIAL_MODEL_PATH = "RL_PPO/model/half_actor_model_MC"  # Use Continuous version
+MODEL_PATH = "checkpoints_MC/best_actor_model_MC"  # Use Continuous version
+PARTIAL_MODEL_PATH = "checkpoints_MC/half_actor_model_MC"  # Use Continuous version
 CSV_FILE = "ppo_mountain_car_rollouts.csv"
 DIR_NAME = "ppo_mountain_car_rollouts"
 NUM_EPISODES = 100
