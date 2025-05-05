@@ -201,7 +201,7 @@ if __name__ == "__main__":
     n_epochs = 10
     alpha = 1e-3  # lr
     agent = PPO(n_actions=env.action_space.n, batch_size=batch_size, alpha=alpha, n_epochs=n_epochs, input_dims=env.observation_space.shape)
-    n_episode = 100
+    n_episode = 200
     # min_rewards = -1000
 
     best_score = env.reward_range[0]
@@ -250,20 +250,20 @@ if __name__ == "__main__":
     best_idx = avg_score_history.index(max(avg_score_history))
     best_model = model_history[best_idx]
 
-    half_idx = min(range(len(avg_score_history)), key=lambda i: abs((avg_score_history[i] - min(avg_score_history)) - (avg_score_history[best_idx] - min(avg_score_history)) / 2))
+    half_idx = min(range(len(avg_score_history)), key=lambda i: abs(avg_score_history[i] - avg_score_history[best_idx] * 2))
     half_model = model_history[half_idx]
 
     # save model
-    print("save best model with score of", avg_score_history[best_idx])
-    torch.save(best_model, "RL_PPO/model/best_actor_model")
-    print("save half model with score of", avg_score_history[half_idx])
-    torch.save(half_model, "RL_PPO/model/half_actor_model")
+    print("save best model with score of", score_history[best_idx])
+    torch.save(best_model, "RL_PPO/model/best_actor_model_MC")
+    print("save half model with score of", score_history[half_idx])
+    torch.save(half_model, "RL_PPO/model/half_actor_model_MC")
 
     # visualize the best model
 
     env = gym.make("MountainCar-v0", render_mode="human")
     agent = PPO(n_actions=env.action_space.n, input_dims=env.observation_space.shape)
-    agent.load_models("RL_PPO/model/best_actor_model")
+    agent.load_models("RL_PPO/model/best_actor_model_MC")
 
     n_try = 1
     for _ in range(n_try):
