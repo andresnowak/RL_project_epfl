@@ -1,5 +1,5 @@
 import gymnasium as gym
-from RL_PPO.PPO_mountaincar import *
+from src.models.PPO_mountaincar import *
 import torch
 import argparse
 
