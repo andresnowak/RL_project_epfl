@@ -6,3 +6,4 @@ build
 *_tensorboard
 *.egg*
 *.pkl
+RL_proj/
