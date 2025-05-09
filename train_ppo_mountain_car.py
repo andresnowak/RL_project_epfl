@@ -1,7 +1,7 @@
 from copy import deepcopy
 import gym
 from itertools import count
-from src.models.PPO_mountaincar import *
+from src.models.PPO_discrete import *
 
 from src.models.utils import plot_learning_curve
 
