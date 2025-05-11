@@ -1,2 +1,0 @@
-
-    score_history = []
