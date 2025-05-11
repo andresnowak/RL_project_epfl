@@ -2,22 +2,22 @@ import gymnasium as gym
 import torch
 import argparse
 import time
+import numpy as np
 
-from src.generate_demonstrations import collect_paired_demonstrations
-from src.create_env import create_env_continuous
-from src.models.PPO_mountaincarContinuous import PPO
+from src.models.PPO_mountaincarContinuous import ActorNetwork
+from src.models.helpers import TanhNormal
 
-
+# ---- Config ----
 ENV_ID = "MountainCarContinuous-v0"
-num_episodes = 1
-sleep_duration = 0.01
+NUM_EPISODES = 1
+SLEEP_DURATION = 0.01
+MODEL_PATH = "dpo_actor_seed0_K1000.pth"
 
-device = "cpu"
+device = torch.device("cpu")  # safer for MPS devices
 
-
-def visualize_model(env: gym.Env, model: PPO):
-    for episode in range(num_episodes):
-        print(f"\nStarting Episode {episode + 1}/{num_episodes}")
+def visualize_model(env: gym.Env, actor: ActorNetwork):
+    for episode in range(NUM_EPISODES):
+        print(f"\n🎬 Starting Episode {episode + 1}/{NUM_EPISODES}")
         obs, info = env.reset()
         terminated = False
         truncated = False
@@ -25,65 +25,34 @@ def visualize_model(env: gym.Env, model: PPO):
         steps = 0
 
         while not terminated and not truncated:
-            action, _states = model.predict(obs)
+            s = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
+            with torch.no_grad():
+                mu, sigma = actor(s)
+                dist = TanhNormal(mu, sigma)
+                action = dist.mean.cpu().numpy()[0]  # deterministic for viz
 
-            # Take action in the environment
             obs, reward, terminated, truncated, info = env.step(action)
-
-            # Render is often handled automatically by env.step() when render_mode="human"
-            # but you can uncomment the line below if needed for specific envs/wrappers
-            # env.render()
-
             total_reward += reward
             steps += 1
 
-            # Add a small delay to make visualization easier to follow
-            if sleep_duration > 0:
-                time.sleep(sleep_duration)
+            time.sleep(SLEEP_DURATION)
 
-            if terminated or truncated:
-                print(f"Episode finished after {steps} steps.")
-                print(f"Total Reward: {total_reward:.2f}")
-                if terminated:
-                    print("Reason: Agent reached a terminal state.")
-                if truncated:
-                    print("Reason: Episode truncated (e.g., time limit reached).")
-    
+        print(f"🏁 Episode finished after {steps} steps. Total reward: {total_reward:.2f}")
+        if terminated: print("Reason: Agent reached a terminal state.")
+        if truncated:  print("Reason: Episode truncated (e.g., time limit).")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Visualize model")
+    print(f"📦 Loading model from {MODEL_PATH}")
+    
+    env = gym.make(ENV_ID, render_mode="human")
+    n_actions = env.action_space.shape
+    input_dims = env.observation_space.shape
+    action_bound = float(env.action_space.high[0])
 
-    # parser.add_argument(
-    #     "--model",
-    #     type=str,
-    #     required=True,
-    #     help="Path to the trained model (.zip file)",
-    # )
-    # parser.add_argument(
-    #     "--env_id",
-    #     type=str,
-    #     default=ENV_ID,
-    #     help="Gym environment ID (e.g., MountainCarContinuous-v0)",
-    # )
+    actor = ActorNetwork(n_actions, input_dims, action_bound).to(device)
+    actor.load_state_dict(torch.load(MODEL_PATH, map_location=device))
+    actor.eval()
 
-    # args = parser.parse_args()
-
-    # model_path = args.model
-    # env_id = args.env_id
-
-    model_path = "RL_PPO/model/best_actor_model_MCContinuous"
-    env_id = ENV_ID
-
-    print(f"Model loaded from {model_path}")
-
-    # Create environment
-    env = gym.make(env_id, render_mode="human")
-
-    model = PPO(env)
-    model.load_models("RL_PPO/model/best_actor_model_MCContinuous")
-
-    visualize_model(env, model)
-
-    print("\nClosing environment.")
+    visualize_model(env, actor)
     env.close()
-    print("Visualization finished.")
+    print("✅ Visualization finished.")
