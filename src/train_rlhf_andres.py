@@ -1,4 +1,4 @@
-from agents.rlhf_agent import PPORLHFAgent
+from agents.rlhf_agent_andres import PPORLHFAgent
 # from utils import visualize_policy
 import gymnasium as gym
 import pandas as pd

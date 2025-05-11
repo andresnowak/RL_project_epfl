@@ -16,7 +16,6 @@ class RewardModel(nn.Module):
             nn.Linear(state_dim, hidden_dim),
             nn.Tanh(),
             nn.Linear(hidden_dim, 1),
-            nn.Sigmoid(),
         )
 
     def forward(self, x):
@@ -28,5 +27,4 @@ class RewardModel(nn.Module):
         """
         states = torch.from_numpy(np.array(trajectory.states)).float().to(self.device)
         rewards = self.reward_net(states)
-        # rewards = (rewards - rewards.mean()) / rewards.std()
         return rewards.mean()

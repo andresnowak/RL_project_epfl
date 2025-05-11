@@ -6,7 +6,7 @@ from tqdm import tqdm
 import numpy as np
 import random
 from models.ppo_policy import ActorNetwork, CriticNetwork
-from models.reward import RewardModel
+from models.reward_andres import RewardModel
 from torch.utils.data import BatchSampler, SubsetRandomSampler
 import gymnasium as gym
 import copy
@@ -196,7 +196,7 @@ class PPORLHFAgent:
             torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon)
             * advantages
         )
-        policy_loss = -torch.min(surr1, surr2).mean()  # The actor loss (PPO normal)
+        policy_loss = -torch.min(surr1, surr2)  # The actor loss (PPO normal)
 
         return policy_loss
 
@@ -231,7 +231,7 @@ class PPORLHFAgent:
         # Calculate KL divergence between current and reference policy
         with torch.no_grad():
             ref_dist = self.actor_ref(states)
-        kl = torch.distributions.kl.kl_divergence(dist, ref_dist).mean()
+        kl = torch.distributions.kl.kl_divergence(dist, ref_dist)
         
         # Calculate entropy
         entropy = dist.entropy().mean()
@@ -241,8 +241,8 @@ class PPORLHFAgent:
         
         # Total loss
         loss = (
-            policy_loss + 0.5 * critic_loss + self.beta * kl - 0.00 * entropy
-        )  # + value_loss
+            (policy_loss - self.beta * kl).mean() + 0.00 * entropy
+        ) + 0.5 * critic_loss
         
         # Optimization step
         self.optimizer.zero_grad()
@@ -262,12 +262,15 @@ class PPORLHFAgent:
 
             for step in range(10_000):
                 # Get action from policy
-                action, log_prob, value = self.get_action(torch.tensor(state).to(self.device))
+                with torch.no_grad():
+                    action, log_prob, value = self.get_action(torch.tensor(state).to(self.device))
 
                 # Take action in environment
                 next_state, reward, done, truncated, _ = env.step(action)
                 state_tensor = torch.tensor(next_state).to(self.device)
-                reward = self.reward_net(state_tensor)
+        
+                with torch.no_grad():
+                    reward = self.reward_net(state_tensor)
 
                 # Store experience
                 self.memory.store_memory(state, action, log_prob, value, reward.detach(), done)
@@ -297,10 +300,6 @@ class PPORLHFAgent:
                 batches = self.memory.generate_batches()
                 
                 for batch in batches:
-
-                    dist = self.actor(states)
-
-                    new_probs = dist.log_prob(actions)
 
                     # Update policy after each episode
                     loss = self.update_policy(states[batch], actions[batch], old_probs[batch], advantages[batch], returns[batch], old_values[batch])
