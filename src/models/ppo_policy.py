@@ -1,172 +1,68 @@
+import os
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
-from torch.utils.data import BatchSampler, SubsetRandomSampler
-from models.base_policy import BasePolicy
-
-# class PPOMemory:
-#     def __init__(self, batch_size):
-#         self.states = []
-#         self.probs = []
-#         self.vals = []
-#         self.actions = []
-#         self.rewards = []
-#         self.dones = []
-
-#         self.batch_size = batch_size
-
-#     def generate_batches(self):
-#         n_states = len(self.states)
-#         batches = BatchSampler(SubsetRandomSampler(range(n_states)), self.batch_size, drop_last=False)
-
-#         return batches
-
-#     def get_memory(self):
-#         return np.array(self.states), np.array(self.actions), np.array(self.probs), np.array(self.vals), np.array(self.rewards), np.array(self.dones)
-
-#     def store_memory(self, state, action, probs, vals, reward, done):
-#         self.states.append(state)
-#         self.actions.append(action)
-#         self.probs.append(probs)
-#         self.vals.append(vals)
-#         self.rewards.append(reward)
-#         self.dones.append(done)
-
-#     def clear_memory(self):
-#         self.states = []
-#         self.probs = []
-#         self.actions = []
-#         self.rewards = []
-#         self.dones = []
-#         self.vals = []
+from torch.distributions.categorical import Categorical
+import gymnasium as gym
 
 
-class DiscreteActor(nn.Module):
-    def __init__(self, action_dim, state_dim, hidden_dim=256):
-        """
-        Args:
-            action_dim (int): Dimension of the action space. For discrete actions, this is the number of actions.
-            state_dim (int): Dimension of the state space.
-            hidden_dim (int): Dimension of the hidden layers. Default is 256.
-        """
-        super(DiscreteActor, self).__init__()
+class ActorNetwork(nn.Module):
+    def __init__(self, action_dim, state_dim, alpha=1e-3, fc_dims=256):
+        super(ActorNetwork, self).__init__()
+
         self.actor = nn.Sequential(
-            nn.Linear(state_dim, hidden_dim),
+            nn.Linear(state_dim, fc_dims),
             nn.ReLU(),
-            nn.Linear(hidden_dim, action_dim),
+            nn.Linear(fc_dims, action_dim),
             nn.Softmax(dim=-1),
         )
 
     def forward(self, state):
-        """Return the action disttribution given the states
-        For discrete actions, this is a categorical distribution.
-        """
-        logits = self.actor(state)
-        dist = torch.distributions.Categorical(logits)
+        dist = self.actor(state)
+        dist = Categorical(dist)
 
         return dist
 
 
-class ContinuousActor(nn.Module):
-    def __init__(self, action_dim, state_dim, action_bound, hidden_dim=256):
-        """
-        Args:
-            action_dim (int): Dimension of the action space. For continuous actions, this is the number of actions.
-            state_dim (int): Dimension of the state space.
-            hidden_dim (int): Dimension of the hidden layers. Default is 256.
-        """
-        super(ContinuousActor, self).__init__()
-        self.actor = nn.Sequential(
-            nn.Linear(state_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            # nn.ReLU(),
-        )
-        self.mu = nn.Linear(hidden_dim, action_dim)
-        self.sigma = nn.Linear(hidden_dim, action_dim)
-        self.action_bound = action_bound
+class CriticNetwork(nn.Module):
+    def __init__(self, state_dim, alpha, fc_dims=256):
+        super(CriticNetwork, self).__init__()
 
-    def forward(self, state):
-        """
-        Since the action is continuous, we need to calculate the mean and standard deviation of the action distribution.
-        The action distribution is a Gaussian distribution with mean and standard deviation.
-        """
-        x = self.actor(state)
-        mu = F.tanh(self.mu(x)) * self.action_bound
-        sigma = F.softplus(self.sigma(x))
-        dist = torch.distributions.Normal(mu, sigma)
-        return dist
-
-
-class Critic(nn.Module):
-    def __init__(self, state_dim, hidden_dim=256):
-        """
-        Args:
-            state_dim (int): Dimension of the state space.
-            hidden_dim (int): Dimension of the hidden layers. Default is 256.
-        """
-        super(Critic, self).__init__()
         self.critic = nn.Sequential(
-            nn.Linear(state_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, 1),
+            nn.Linear(state_dim, fc_dims), nn.ReLU(), nn.Linear(fc_dims, 1)
         )
 
     def forward(self, state):
-        """Return the value of the state"""
-        return self.critic(state)
+        value = self.critic(state)
+
+        return value
 
 
-class PPOPolicy(BasePolicy):
-    def __init__(self, state_dim, action_dim, action_bound=None, hidden_dim=256):
-        """
-        Args:
-            state_dim (int): Dimension of the state space.
-            action_dim (int): Dimension of the action space. For discrete actions, this is the number of actions.
-            hidden_dim (int): Dimension of the hidden layers. Default is 256.
-        """
-        # init base policy
+class PPOPolicy(nn.Module):
+    def __init__(self, state_dim, action_dim, alpha=1e-3, fc_dims=256):
         super(PPOPolicy, self).__init__()
-        if action_bound is not None:
-            self.actor = ContinuousActor(
-                action_dim, state_dim, action_bound, hidden_dim
-            )
-            self.is_continuous_env = True
-        else:
-            self.actor = DiscreteActor(action_dim, state_dim, hidden_dim)
-            self.is_continuous_env = False
+        self.actor = ActorNetwork(action_dim, state_dim, alpha, fc_dims)
+        self.critic = CriticNetwork(state_dim, alpha, fc_dims)
 
-        self.critic = Critic(state_dim, hidden_dim)
+    def forward(self, state):
+        # Unsure the state is a tensor
+        assert isinstance(state, torch.Tensor), "State must be a tensor"
 
-    def act(self, state):
-        state = torch.FloatTensor(state).unsqueeze(0)
-        with torch.no_grad():
-            dist = self.actor(state)
-            action = dist.sample()
+        dist = self.actor(state)
+        value = self.critic(state)
+        return dist, value
 
-            if self.is_continuous_env:
-                log_prob = dist.log_prob(action).sum(-1)
-                return action.squeeze(0).numpy(), log_prob.item()
-            else:
-                log_prob = dist.log_prob(action)
-                return action.item(), log_prob.item()
 
-    def evaluate(self, states, actions):
-        states = torch.FloatTensor(states)
-        if self.is_continuous_env:
-            actions = torch.FloatTensor(actions)
-        else:
-            actions = torch.LongTensor(actions)
+if __name__ == "__main__":
+    # Example usage
+    env = gym.make("CartPole-v1")
+    actor = ActorNetwork(
+        action_dim=env.action_space.n, state_dim=env.observation_space.shape[0]
+    )
+    actor.load_state_dict(
+        torch.load(
+            "/Users/iris/Documents/master@epfl/ma2/rl/rl_github/rl_2/checkpoints_cartpole/best_actor_model_CP"
+        )
+    )
 
-        dist = self.actor(states)
-        state_values = self.critic(states).squeeze()
-
-        if self.is_continuous_env:
-            log_probs = dist.log_prob(actions).sum(-1)
-            entropy = dist.entropy().sum(-1)
-        else:
-            log_probs = dist.log_prob(actions.squeeze(-1))
-            entropy = dist.entropy()
-
-        return log_probs, state_values, entropy
+    dist = actor(torch.tensor(env.reset()[0]))
+    print(dist)
