@@ -64,7 +64,7 @@ if __name__ == "__main__":
     best_idx = avg_score_history.index(max(avg_score_history))
     best_model = model_history[best_idx]
 
-    half_idx = min(range(len(avg_score_history)), key=lambda i: abs(avg_score_history[i] - avg_score_history[best_idx] / 3) + abs(score_history[i] - score_history[best_idx] / 3))
+    half_idx = min(range(len(avg_score_history)), key=lambda i: abs(avg_score_history[i] - avg_score_history[best_idx] / 1.5) + abs(score_history[i] - score_history[best_idx] / 1.5))
     half_model = model_history[half_idx]
 
     # save model
