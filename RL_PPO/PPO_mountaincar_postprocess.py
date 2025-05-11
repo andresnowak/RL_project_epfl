@@ -8,18 +8,18 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from PPO_mountaincar import ActorNetwork, PPO
+from PPO_mountaincarContinuous import ActorNetwork, PPO
 
-visualize = False
+visualize = True
 if visualize:
     render_mode = "human"
 else:
     render_mode = None
-env = gym.make("MountainCar-v0", render_mode=render_mode)
-agent1 = PPO(n_actions=env.action_space.n, input_dims=env.observation_space.shape)
-agent1.load_models("RL_PPO/model/best_actor_model")
-agent2 = PPO(n_actions=env.action_space.n, input_dims=env.observation_space.shape)
-agent2.load_models("RL_PPO/model/half_actor_model")
+env = gym.make("MountainCarContinuous-v0", render_mode="human")
+agent1 = PPO(n_actions=env.action_space.shape, input_dims=env.observation_space.shape, action_bound=float(env.action_space.high[0]))
+agent1.load_models("RL_PPO/model/best_actor_model_MCContinuous")
+# agent2 = PPO(n_actions=env.action_space.n, input_dims=env.observation_space.shape)
+# agent2.load_models("RL_PPO/model/はlf_actor_model_MCContinuous")
 
 if visualize:
     n_try = 1
@@ -35,36 +35,3 @@ if visualize:
                 break
 
     env.close()
-
-# generate trajectory
-K = 30
-trajectory_buffer = []
-trajectory = []  # [(t_1,t_2)_1,...,(t_1,t_2)_K]
-reward_buffer = []  # [(R_1,R_2)_1,...,(R_1,R_2)_K]
-
-for k in range(K):
-    # agent1
-    state, _ = env.reset()
-    done = False
-    cum_reward1 = 0
-    cum_reward2 = 0
-    while not done:
-        action, probs, value = agent1.choose_action(state)
-        state_, reward, terminated, truncated, _ = env.step(action)
-        state = state_
-        cum_reward1 += reward
-        done = terminated
-
-    # agent2
-    state, _ = env.reset()
-    done = False
-
-    while not done:
-        action, probs, value = agent2.choose_action(state)
-        state_, reward, terminated, truncated, _ = env.step(action)
-        state = state_
-        cum_reward2 += reward
-        done = terminated
-
-    reward_buffer.append([cum_reward1, cum_reward2])
-print(reward_buffer)

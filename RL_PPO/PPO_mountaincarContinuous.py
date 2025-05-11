@@ -25,13 +25,13 @@ class PPOMemory:
         self.batch_size = batch_size
 
     def generate_batches(self):
-        # n_states = len(self.states)
-        # batches = BatchSampler(SubsetRandomSampler(range(n_states)), self.batch_size, drop_last=False)
         n_states = len(self.states)
-        batch_start = np.arange(0, n_states, self.batch_size)
-        indices = np.arange(n_states, dtype=np.int64)
-        np.random.shuffle(indices)
-        batches = [indices[i : i + self.batch_size] for i in batch_start]
+        batches = BatchSampler(SubsetRandomSampler(range(n_states)), self.batch_size, drop_last=False)
+        # n_states = len(self.states)
+        # batch_start = np.arange(0, n_states, self.batch_size)
+        # indices = np.arange(n_states, dtype=np.int64)
+        # np.random.shuffle(indices)
+        # batches = [indices[i : i + self.batch_size] for i in batch_start]
 
         return batches
 
@@ -181,14 +181,17 @@ class PPO:
 
                 critic_value = torch.squeeze(critic_value)
 
-                new_probs = dist.log_prob(actions)
+                # new_probs = dist.log_prob(actions)
+                new_probs = torch.squeeze(dist.log_prob(actions))
                 # prob_ratio = new_probs.exp() / old_probs.exp()
                 prob_ratio = (new_probs - old_probs).exp()
+                # print(prob_ratio.shape)
                 weighted_probs = advantage[batch] * prob_ratio
                 weighted_clipped_probs = torch.clamp(prob_ratio, 1 - self.policy_clip, 1 + self.policy_clip) * advantage[batch]
                 actor_loss = -torch.min(weighted_probs, weighted_clipped_probs).mean()
 
                 returns = advantage[batch] + values[batch]
+                # returns = (returns - returns.mean()) / (returns.std() + 1e-8)
                 critic_loss = (returns - critic_value) ** 2
                 critic_loss = critic_loss.mean()
 
@@ -205,7 +208,7 @@ class PPO:
 if __name__ == "__main__":
     env = gym.make("MountainCarContinuous-v0")
     # N = 30
-    batch_size = 64
+    batch_size = 1024
     n_epochs = 10
     alpha = 1e-4  # lr
     agent = PPO(n_actions=env.action_space.shape, action_bound=float(env.action_space.high[0]), batch_size=batch_size, alpha=alpha, n_epochs=n_epochs, input_dims=env.observation_space.shape)
@@ -224,19 +227,20 @@ if __name__ == "__main__":
     # torch.manual_seed(seed)
 
     for i in range(n_episode):
-        observation, _ = env.reset(seed=seed)
+        observation, _ = env.reset()
         done = False
         score = 0
 
         while 1:
             action, prob, val = agent.choose_action(observation)
-            observation_, reward, done, truncated, _ = env.step(action)
-
+            observation_, reward, terminated, truncated, _ = env.step(action)
             n_steps += 1
             score += reward
-            agent.remember(observation, action, prob, val, reward, done)
+            agent.remember(observation, action, prob, val, reward, terminated)
             observation = observation_
-            if done:
+            done = terminated
+            # print(reward)
+            if done or score < -2000:
                 print(f"episode {i} done... Score: {score}")
                 agent.learn()
                 learn_iters += 1
