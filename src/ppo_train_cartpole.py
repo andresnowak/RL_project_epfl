@@ -17,7 +17,8 @@ if __name__ == "__main__":
     n_episode = 300
 
     score_history = []
-    model_history = []
+    actor_model_history = []
+    critic_model_history = []
 
     learn_iters = 0
     avg_score = 0
@@ -45,7 +46,8 @@ if __name__ == "__main__":
                 learn_iters += 1
                 score_history.append(score)
                 avg_score = np.mean(score_history[-100:])
-                model_history.append(deepcopy(agent.ppo_policy.actor.state_dict()))
+                actor_model_history.append(deepcopy(agent.ppo_policy.actor.state_dict()))
+                critic_model_history.append(deepcopy(agent.ppo_policy.critic.state_dict()))
                 break
 
         print("episode", i, "score %.1f" % score, "avg score %.1f" % avg_score, "time_steps", n_steps, "learning_steps", learn_iters)
@@ -60,13 +62,18 @@ if __name__ == "__main__":
         avg_score_history[i] = np.mean(score_history[max(0, i - 100) : (i + 1)])
     avg_score_history = avg_score_history.tolist()
     best_idx = avg_score_history.index(max(avg_score_history))
-    best_model = model_history[best_idx]
+    best_actor_model = actor_model_history[best_idx]
+    best_critic_model = critic_model_history[best_idx]
 
     half_idx = min(range(len(avg_score_history)), key=lambda i: abs(avg_score_history[i] - avg_score_history[best_idx] / 1.5) + abs(score_history[i] - score_history[best_idx] / 1.5))
-    half_model = model_history[half_idx]
+    half_actor_model = actor_model_history[half_idx]
+    half_critic_model = critic_model_history[half_idx]
 
-    # save model
+    # save actor model
     print("save best model with score of", score_history[best_idx])
-    torch.save(best_model, "checkpoints/best_actor_model_" + ENV_NAME)
+    torch.save(best_actor_model, "checkpoints/best_actor_model_" + ENV_NAME)
     print("save half model with score of", score_history[half_idx])
-    torch.save(half_model, "checkpoints/half_actor_model_" + ENV_NAME)
+    torch.save(half_actor_model, "checkpoints/half_actor_model_" + ENV_NAME)
+    # save critic model
+    torch.save(best_critic_model, "checkpoints/best_critic_model_" + ENV_NAME)
+    torch.save(half_critic_model, "checkpoints/half_critic_model_" + ENV_NAME)
