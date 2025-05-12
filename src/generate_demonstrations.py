@@ -18,6 +18,11 @@ def _flatten_data(data: Any, prefix: str) -> Dict[str, Any]:
     if isinstance(data, np.ndarray):
         # Flatten and prefix numpy arrays
         return {f"{prefix}_{i}": val for i, val in enumerate(data.flatten())}
+    elif isinstance(data, torch.Tensor):
+        return {
+            f"{prefix}_{i}": val.item() if val.numel() == 1 else val.cpu().numpy()
+            for i, val in enumerate(data.flatten())
+        }
     elif np.isscalar(data):
         # Keep scalars as is with a single key
         return {prefix: data}
