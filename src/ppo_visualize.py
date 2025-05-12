@@ -2,6 +2,7 @@ from agents.ppo_discrete import *
 import gymnasium as gym
 
 ENV_NAME = "CartPole-v1"
+# ENV_NAME = "MountainCar-v0"
 MODEL_PATH = "checkpoints/best_actor_model_" + ENV_NAME
 
 
