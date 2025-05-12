@@ -75,8 +75,8 @@ class PPORLHFAgent:
         lr=0.001,
         gamma=0.99,
         clip_epsilon=0.2,
-        beta_critic=0.01,
-        beta_kl=0.01,
+        beta_critic=0.5,
+        beta_kl=0.5,
         lam=0.95,
         seed=42,
     ):
@@ -97,10 +97,7 @@ class PPORLHFAgent:
         )
 
         # Frozen reference actor
-        # Clone a nn.Module
-
         self.actor_ref = copy.deepcopy(self.actor)
-        # self.actor_ref = self.actor.clone()
         self.actor_ref.eval()
 
         # Critic network for value function
@@ -108,9 +105,10 @@ class PPORLHFAgent:
             state_dim=self.state_dim,
         )
         # TODO: load pretrained critic from "half" model
-        # self.critic.load_state_dict(
-        #     torch.load(Path(critic_model_path), map_location=device)
-        # )
+        critic_model_path = "/Users/iris/Documents/master@epfl/ma2/rl/rl_github/rl_2/checkpoints_mountain_car/half_critic_model"
+        self.critic.load_state_dict(
+            torch.load(Path(critic_model_path), map_location=device)
+        )
         self.critic.to(device)
 
         # Reward model
@@ -133,6 +131,12 @@ class PPORLHFAgent:
         self.beta_kl = beta_kl
         self.lam = lam
         self.seed = seed
+
+    def save_models(self, path):
+        torch.save(self.actor.state_dict(), path + "_actor.pth")
+        torch.save(self.critic.state_dict(), path + "_critic.pth")
+        torch.save(self.reward_net.state_dict(), path + "_reward.pth")
+        print(f"Models saved to {path}")
 
     def train_reward_model(self, preferences, n_epochs, batch_size):
         random.seed(self.seed)
@@ -193,7 +197,7 @@ class PPORLHFAgent:
             "actor_loss": [],
             "critic_loss": [],
             "kl_loss": [],
-            "total_loss": 0,
+            "total_loss": [],
         }
         for epoch in tqdm(range(n_epochs), desc="Training Policy"):
             batches = memory.generate_batches()
@@ -228,13 +232,12 @@ class PPORLHFAgent:
 
                 # RLHF loss (KL divergence between actor and reference actor)
                 dist_ref = self.actor_ref(batch_states)
-                batch_ref_probs = dist_ref.log_prob(batch_actions)
-                approx_kl = torch.mean(batch_new_probs - batch_ref_probs)
+                # batch_ref_probs = dist_ref.log_prob(batch_actions)
+                # approx_kl = torch.mean(batch_new_probs - batch_ref_probs)
+                kl = torch.mean(torch.distributions.kl.kl_divergence(dist, dist_ref))
 
                 total_loss = (
-                    actor_loss
-                    + self.beta_critic * critic_loss
-                    - self.beta_kl * approx_kl
+                    actor_loss + self.beta_critic * critic_loss + self.beta_kl * kl
                 )
                 self.optimizer.zero_grad()
                 total_loss.backward()
@@ -242,26 +245,22 @@ class PPORLHFAgent:
 
                 loss["actor_loss"].append(actor_loss.item())
                 loss["critic_loss"].append(critic_loss.item())
-                loss["kl_loss"].append(approx_kl.item())
-                loss["total_loss"] = total_loss.item()
+                # loss["kl_loss"].append(approx_kl.item())
+                loss["kl_loss"].append(kl.item())
+                loss["total_loss"].append(total_loss.item())
 
-            logger.info(
-                f"Epoch {epoch + 1}/{n_epochs}, "
-                f"Actor Loss: {np.mean(loss['actor_loss']):.4f}, "
-                f"Critic Loss: {np.mean(loss['critic_loss']):.4f}, "
-                f"KL Loss: {np.mean(loss['kl_loss']):.4f}, "
-                f"Total Loss: {loss['total_loss']:.4f}"
-            )
             print(
                 f"Epoch {epoch + 1}/{n_epochs}, "
                 f"Actor Loss: {np.mean(loss['actor_loss']):.4f}, "
                 f"Critic Loss: {np.mean(loss['critic_loss']):.4f}, "
                 f"KL Loss: {np.mean(loss['kl_loss']):.4f}, "
-                f"Total Loss: {loss['total_loss']:.4f}"
+                f"Total Loss: {np.mean(loss['total_loss']):.4f}"
             )
 
+            self.evaluate()
+
     def train(
-        self, preferences, reward_epochs, policy_epochs, batch_size, max_steps=100
+        self, preferences, reward_epochs, policy_epochs, batch_size, max_steps=1000
     ):
         # Train the reward model
         self.train_reward_model(
@@ -299,3 +298,22 @@ class PPORLHFAgent:
 
             self.update_policy(memory, policy_epochs)
             memory.clear_memory()
+
+    def evaluate(self, num_episodes=5):
+        total_reward = [0] * num_episodes
+        for episode in range(num_episodes):
+            state, _ = self.env.reset(seed=self.seed)
+            done = False
+            while not done:
+                state_tensor = torch.tensor(state, dtype=torch.float32).to(self.device)
+                dist = self.actor(state_tensor)
+                action = torch.squeeze(dist.sample()).item()
+                next_state, reward, done, _, _ = self.env.step(action)
+                total_reward[episode] += reward
+                state = next_state
+
+            print(
+                f"Episode {episode + 1}/{num_episodes}, Total Reward: {total_reward[episode]:.2f}"
+            )
+        avg_reward = sum(total_reward) / num_episodes
+        print(f"Average reward over {num_episodes} episodes: {avg_reward:.2f}")
