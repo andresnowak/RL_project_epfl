@@ -1,10 +1,9 @@
-from src.models.ppo_policy import *
+from models.ppo_policy import *
 import os
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.distributions.categorical import Categorical
 from torch.utils.data import BatchSampler, SubsetRandomSampler
 
 
@@ -21,9 +20,6 @@ class PPOMemory:
 
     def generate_batches(self):
         n_states = len(self.states)
-        # batch_start = np.arange(0, n_states, self.batch_size)
-        # indices = np.arange(n_states, dtype=np.int64)
-        # np.random.shuffle(indices)
         batches = BatchSampler(SubsetRandomSampler(range(n_states)), self.batch_size, drop_last=False)
 
         return batches
@@ -48,11 +44,43 @@ class PPOMemory:
         self.vals = []
 
 
-class PPOAGENT:
-    def __init__(self, env, batch_size, alpha, n_epochs):
+class PPO_DISCRETE_AGENT:
+    def __init__(
+        self,
+        env,
+        device,
+        batch_size,
+        n_epochs,
+        gamma=0.99,
+        alpha=0.0003,
+        gae_lambda=0.95,
+        policy_clip=0.2,
+    ):
+        self.device = device
         self.memory = PPOMemory(batch_size)
-        self.ppo_policy = PPOPolicy(env.observation_space.shape[0], env.action_space.n, alpha=alpha, fc_dims=256)
+        self.ppo_policy = PPOPolicy(env.observation_space.shape[0], env.action_space.n, fc_dims=256).to(self.device)
         self.n_epochs = n_epochs
+        self.gamma = gamma
+        self.gae_lambda = gae_lambda
+        self.policy_clip = policy_clip
+        self.alpha = alpha
+        self.optimizer_actor = optim.Adam(self.ppo_policy.actor.parameters(), lr=alpha)
+        self.optimizer_critic = optim.Adam(self.ppo_policy.critic.parameters(), lr=alpha)
+
+    def remember(self, state, action, probs, vals, reward, done):
+        self.memory.store_memory(state, action, probs, vals, reward, done)
+
+    def choose_action(self, observation):
+        state = torch.tensor([observation], dtype=torch.float).to(self.device)
+
+        dist, value = self.ppo_policy(state)
+        action = dist.sample()
+
+        probs = torch.squeeze(dist.log_prob(action)).item()
+        action = torch.squeeze(action).item()
+        value = torch.squeeze(value).item()
+
+        return action, probs, value
 
     def learn(self):
         n_learning = 0
@@ -67,21 +95,21 @@ class PPOAGENT:
             advantage[t] = gae
 
         advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
-        advantage = torch.tensor(advantage).to(self.actor.device)
+        advantage = torch.tensor(advantage).to(self.device)
 
         for _ in range(self.n_epochs):
             batches = self.memory.generate_batches()
 
-            values = torch.tensor(values).to(self.actor.device)
+            values = torch.tensor(values).to(self.device)
             for batch in batches:
                 n_learning += 1
-                states = torch.tensor(state_arr[batch], dtype=torch.float).to(self.actor.device)
-                old_probs = torch.tensor(old_prob_arr[batch]).to(self.actor.device)
-                actions = torch.tensor(action_arr[batch]).to(self.actor.device)
+                states = torch.tensor(state_arr[batch], dtype=torch.float).to(self.device)
+                old_probs = torch.tensor(old_prob_arr[batch]).to(self.device)
+                actions = torch.tensor(action_arr[batch]).to(self.device)
 
-                dist = self.actor(states)
-                critic_value = self.critic(states)
-
+                # dist = self.actor(states)
+                # critic_value = self.critic(states)
+                dist, critic_value = self.ppo_policy(states)
                 critic_value = torch.squeeze(critic_value)
 
                 new_probs = dist.log_prob(actions)
@@ -96,10 +124,10 @@ class PPOAGENT:
                 critic_loss = critic_loss.mean()
 
                 total_loss = actor_loss + 0.5 * critic_loss
-                self.actor.optimizer.zero_grad()
-                self.critic.optimizer.zero_grad()
+                self.optimizer_actor.zero_grad()
+                self.optimizer_critic.zero_grad()
                 total_loss.backward()
-                self.actor.optimizer.step()
-                self.critic.optimizer.step()
+                self.optimizer_actor.step()
+                self.optimizer_critic.step()
         print("total learning iter: ", n_learning)
         self.memory.clear_memory()
