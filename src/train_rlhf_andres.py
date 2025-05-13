@@ -6,29 +6,34 @@ from data.trajectory import Trajectory
 import torch
 import numpy as np
 from sklearn.model_selection import train_test_split
+import os
+
+ENV_NAME = "CartPole-v1"
 
 
 def load_trajectories(data_dir):
     trajectories_1_df = pd.read_csv(
-        data_dir
-        + "/full_model_trajectories_Acrobot-v1.csv"
+        os.path.join(data_dir, f"full_model_trajectories_{ENV_NAME}.csv")
     )
     trajectories_2_df = pd.read_csv(
-        data_dir + "/partial_model_trajectories_Acrobot-v1.csv"
+        os.path.join(data_dir, f"partial_model_trajectories_{ENV_NAME}.csv")
     )
     preferences_df = pd.read_csv(
-        data_dir + "/preference_pairs_Acrobot-v1.csv"
+        os.path.join(data_dir, f"preference_pairs_{ENV_NAME}.csv")
     )
+
+    obs_columns = [col for col in trajectories_1_df.columns if col.startswith("obs_")]
 
     preferences = []
     for i in range(len(preferences_df)):
         traj_id1 = preferences_df.iloc[i]["traj1_id"]
         traj_id2 = preferences_df.iloc[i]["traj2_id"]
+    
         states_1 = trajectories_1_df[trajectories_1_df.episode_id == traj_id1][
-            ["obs_0", "obs_1", "obs_2", "obs_3", "obs_4", "obs_5"]
+            obs_columns
         ].values
         states_2 = trajectories_2_df[trajectories_2_df.episode_id == traj_id2][
-            ["obs_0", "obs_1", "obs_2", "obs_3", "obs_4", "obs_5"]
+            obs_columns
         ].values
         actions_1 = trajectories_1_df[trajectories_1_df.episode_id == traj_id1][
             ["action"]
@@ -132,8 +137,8 @@ if __name__ == "__main__":
         random_state=42
     )
 
-    env = gym.make("Acrobot-v1")
-    agent = PPORLHFAgent(env, "cpu", "../checkpoints_2/half_actor_model_Acrobot-v1", n_epochs=10)
+    env = gym.make(ENV_NAME)
+    agent = PPORLHFAgent(env, "cpu", f"../checkpoints_2/half_actor_model_{ENV_NAME}", n_epochs=10, entropy_coef=0.001)
 
     # ========== BEFORE TRAINING ==========
     print("\n=== Pre-Training Evaluation ===")
@@ -142,7 +147,7 @@ if __name__ == "__main__":
     pre_train_reward = evaluate_policy(agent, env, 20)
     
     # Visualize
-    record_env = gym.make("Acrobot-v1", render_mode="rgb_array")
+    record_env = gym.make(ENV_NAME, render_mode="rgb_array")
     record_env = gym.wrappers.RecordVideo(record_env, "videos_before_training/")
     visualize_policy(agent.actor, record_env, 3)
 
@@ -160,7 +165,7 @@ if __name__ == "__main__":
     post_train_reward = evaluate_policy(agent, env, 20)
     
     # Visualize
-    record_env = gym.make("Acrobot-v1", render_mode="rgb_array")
+    record_env = gym.make(ENV_NAME, render_mode="rgb_array")
     record_env = gym.wrappers.RecordVideo(record_env, "videos_after_training/")
     visualize_policy(agent.actor, record_env, 3)
 

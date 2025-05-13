@@ -73,7 +73,7 @@ class PPORLHFAgent:
         actor_model_path: str,
         lr_reward=0.001,
         lr_actor=1e-4,
-        lr_critic=1e-3,
+        lr_critic=1e-4,
         gamma=0.99,
         clip_epsilon=0.2,
         beta=0.01,
