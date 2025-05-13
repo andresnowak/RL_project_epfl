@@ -4,6 +4,8 @@ import gymnasium as gym
 import pandas as pd
 from data.trajectory import Trajectory
 import torch
+import numpy as np
+from sklearn.model_selection import train_test_split
 
 
 def load_trajectories(data_dir):
@@ -28,8 +30,15 @@ def load_trajectories(data_dir):
         states_2 = trajectories_2_df[trajectories_2_df.episode_id == traj_id2][
             ["obs_0", "obs_1", "obs_2", "obs_3", "obs_4", "obs_5"]
         ].values
-        t1 = Trajectory(states=states_1)
-        t2 = Trajectory(states=states_2)
+        actions_1 = trajectories_1_df[trajectories_1_df.episode_id == traj_id1][
+            ["action"]
+        ].values
+        actions_2 = trajectories_2_df[trajectories_2_df.episode_id == traj_id2][
+            ["action"]
+        ].values
+        t1 = Trajectory(states=states_1, actions=actions_1)
+        t2 = Trajectory(states=states_2, actions=actions_2)
+
         if preferences_df.iloc[i]["chosen_one"] == 1:
             t1, t2 = t2, t1
         preferences.append((t1, t2))
@@ -53,64 +62,105 @@ def visualize_policy(policy_model, env, num_episodes=5, seed=42):
             env.render()
     env.close()
 
+def evaluate_policy(agent, env, num_episodes=10):
+    """Evaluate policy by running episodes and returning mean reward"""
+    total_rewards = []
+
+    for _ in range(num_episodes):
+        state, _ = env.reset()
+        done = False
+        episode_reward = 0
+
+        while not done:
+            with torch.no_grad():
+                state_tensor = torch.tensor(state, dtype=torch.float32)
+                action = agent.actor(state_tensor).sample().numpy()
+
+            next_state, reward, done, _, _ = env.step(action)
+            episode_reward += reward
+            state = next_state
+
+        total_rewards.append(episode_reward)
+
+    mean_reward = sum(total_rewards) / num_episodes
+    print(f"Mean Episode Reward: {mean_reward:.2f}")
+    return mean_reward
+
+
+def evaluate_reward_model(agent: PPORLHFAgent, preferences):
+    """Evaluate reward model accuracy on preference pairs with variable-length trajectories"""
+    correct = 0
+    total = 0
+
+    for traj1, traj2 in preferences:
+        # Convert to tensors and move to device
+        states1 = traj1.states.to(agent.device)
+        actions1 = traj1.actions.to(agent.device)
+        states2 = traj2.states.to(agent.device)
+        actions2 = traj2.actions.to(agent.device)
+
+        # Compute rewards (handle variable lengths)
+        with torch.no_grad():
+            # Option 1: Sum of rewards (for variable lengths)
+            # r1 = agent.reward_net(
+            #     states1, actions1
+            # ).sum()  # Sum rewards along trajectory
+            # r2 = agent.reward_net(states2, actions2).sum()
+
+            # Option 2: Average reward (normalizes for length)
+            r1 = agent.reward_net(states1, actions1).mean()
+            r2 = agent.reward_net(states2, actions2).mean()
+
+        # Compare rewards (assuming traj1 is the preferred one in the pair)
+        if (r1 > r2).item():
+            correct += 1
+        total += 1
+
+    accuracy = correct / total
+    print(f"Reward Model Accuracy: {accuracy:.2%}")
+    return accuracy
+
 
 if __name__ == "__main__":
-    preferences = load_trajectories(
-        data_dir="../data/ppo_acrobot_rollouts",
-    )
-    env_id = "Acrobot-v1"
-    env = gym.make(env_id)
+    # Load data and initialize
+    preferences = load_trajectories("../data/ppo_acrobot_rollouts")
 
-    agent = PPORLHFAgent(
-        env,
-        "cpu",
-        "../checkpoints_2/half_actor_model_Acrobot-v1",
+    train_prefs, val_prefs = train_test_split(
+        preferences, 
+        test_size=0.2,
+        random_state=42
     )
 
-    # t1 = Trajectory(
-    #     states=[env.reset()[0], env.reset()[0]],  # Dummy trajectory for demonstration
-    # )
-    # t2 = Trajectory(
-    #     states=[env.reset()[0]],  # Dummy trajectory for demonstration
-    # )
-    # prefereces = [(t1, t2)]
+    env = gym.make("Acrobot-v1")
+    agent = PPORLHFAgent(env, "cpu", "../checkpoints_2/half_actor_model_Acrobot-v1", n_epochs=10)
 
-    # agent.evaluate(
-    #     num_episodes=5,
-    # )
+    # ========== BEFORE TRAINING ==========
+    print("\n=== Pre-Training Evaluation ===")
+    
+    # Evaluate policy
+    pre_train_reward = evaluate_policy(agent, env, 20)
+    
+    # Visualize
+    record_env = gym.make("Acrobot-v1", render_mode="rgb_array")
+    record_env = gym.wrappers.RecordVideo(record_env, "videos_before_training/")
+    visualize_policy(agent.actor, record_env, 3)
 
-    # visualize_policy(
-    #     env,
-    #     agent.policy_net,
-    #     num_episodes=5,
-    # )
+    # ========== TRAINING ==========
+    print("\n=== Training ===")
+    agent.train(100, preferences=preferences)
 
-    env = gym.make(env_id, render_mode="rgb_array")
-    env = gym.wrappers.RecordVideo(
-        env,
-        video_folder="videos_before_training/",
-        episode_trigger=lambda episode_id: True,  # record every episode
-    )
-    visualize_policy(
-        policy_model=agent.actor,
-        env=env,
-        num_episodes=5,
-    )
+    # ========== AFTER TRAINING ==========
+    print("\n=== Post-Training Evaluation ===")
 
-    agent.train(
-        100,
-        preferences=preferences,
-    )
+    print("\nReward Model (After Training):")
+    evaluate_reward_model(agent, val_prefs)  # Evaluate on held-out validation set
+    
+    # Evaluate policy
+    post_train_reward = evaluate_policy(agent, env, 20)
+    
+    # Visualize
+    record_env = gym.make("Acrobot-v1", render_mode="rgb_array")
+    record_env = gym.wrappers.RecordVideo(record_env, "videos_after_training/")
+    visualize_policy(agent.actor, record_env, 3)
 
-
-    env = gym.make(env_id, render_mode="rgb_array")
-    env = gym.wrappers.RecordVideo(
-        env,
-        video_folder="videos_after_training/",
-        episode_trigger=lambda episode_id: True,  # record every episode
-    )
-    visualize_policy(
-        policy_model=agent.actor,
-        env=env,
-        num_episodes=5,
-    )
+    print(f"\nImprovement: {post_train_reward - pre_train_reward:.2f}")

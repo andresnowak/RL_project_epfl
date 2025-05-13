@@ -10,6 +10,7 @@ from models.reward_andres import RewardModel
 from torch.utils.data import BatchSampler, SubsetRandomSampler
 import gymnasium as gym
 import copy
+import matplotlib.pyplot as plt
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -76,7 +77,7 @@ class PPORLHFAgent:
         beta=0.01,
         lam=0.95,
         seed=42,
-        max_steps_per_episode=1000,
+        max_steps_per_episode=1_000,
         n_epochs=4,
         entropy_coef=0.01,
         value_coef=0.5,
@@ -110,6 +111,7 @@ class PPORLHFAgent:
         # Initialize reward model
         self.reward_net = RewardModel(
             state_dim=self.state_dim,
+            action_dim=self.action_dim,
             hidden_dim=256,
             device=device,
         ).to(device)
@@ -230,7 +232,7 @@ class PPORLHFAgent:
 
                 epoch_loss += loss.item()
 
-            logger.info(f"Epoch {epoch + 1}/{n_epochs}, Loss: {epoch_loss:.4f}")
+            print(f"Epoch {epoch + 1}/{n_epochs}, Loss: {epoch_loss:.4f}")
 
     def actor_loss(self, states, actions, old_log_probs, advantages):
         """Compute PPO actor loss"""
@@ -300,6 +302,12 @@ class PPORLHFAgent:
         # Combined loss
         total_loss = actor_total_loss + self.value_coef * value_loss
 
+        total_norm = 0.0
+        for p in list(self.actor.parameters()) + list(self.critic.parameters()):
+            if p.grad is not None:
+                total_norm += p.grad.data.norm(2).item() ** 2
+        total_norm = total_norm ** 0.5
+
         # Optimization step
         self.ppo_optimizer.zero_grad()
         total_loss.backward()
@@ -316,17 +324,19 @@ class PPORLHFAgent:
             "value_loss": value_loss.item(),
             "entropy": entropy.item(),
             "kl_div": kl_div.item(),
+            "gradient_norm": total_norm,
         }
 
     def train(self, num_episodes: int, preferences=None):
         """Main training loop"""
         # Train reward model if preferences are provided
         if preferences:
-            self.train_reward_model(preferences, n_epochs=100, batch_size=128)
+            self.train_reward_model(preferences, n_epochs=200, batch_size=128)
             self.reward_net.eval()  # Set reward model to evaluation mode
 
         episode_counter = 0
         total_episodes = 0
+        total_epoch_metrics = []
 
         # Main training loop
         for iteration in range(num_episodes):
@@ -353,10 +363,12 @@ class PPORLHFAgent:
                 # Get reward from reward model if available
                 if self.reward_net is not None:
                     with torch.no_grad():
-                        state_tensor = torch.tensor(next_state, dtype=torch.float32).to(
+                        state_tensor = torch.tensor(state, dtype=torch.float32).to(
                             self.device
-                        )
-                        reward = self.reward_net(state_tensor).item()
+                        ).unsqueeze(0)
+                        action_tensor = torch.tensor(action, dtype=torch.long).to(self.device)
+
+                        reward = self.reward_net(state_tensor, action_tensor).item()
                 else:
                     reward = env_reward
 
@@ -415,6 +427,7 @@ class PPORLHFAgent:
             advantages = torch.tensor(advantages, dtype=torch.float32).to(self.device)
             returns = torch.tensor(returns, dtype=torch.float32).to(self.device)
 
+
             # Perform multiple epochs of mini-batch updates
             for epoch in range(self.n_epochs):
                 # Generate batches
@@ -427,6 +440,7 @@ class PPORLHFAgent:
                     "value_loss": 0,
                     "entropy": 0,
                     "kl_div": 0,
+                    "gradient_norm": 0,
                 }
 
                 # Update policy for each batch
@@ -457,6 +471,8 @@ class PPORLHFAgent:
                 for key in epoch_metrics:
                     epoch_metrics[key] /= num_batches
 
+                total_epoch_metrics.append(epoch_metrics)
+
                 # Log metrics
                 print(
                     f"Iteration {iteration + 1}, Epoch {epoch + 1}/{self.n_epochs}: "
@@ -464,11 +480,31 @@ class PPORLHFAgent:
                     f"Policy Loss: {epoch_metrics['policy_loss']:.4f}, "
                     f"Value Loss: {epoch_metrics['value_loss']:.4f}, "
                     f"Entropy: {epoch_metrics['entropy']:.4f}, "
-                    f"KL Div: {epoch_metrics['kl_div']:.4f}"
+                    f"KL Div: {epoch_metrics['kl_div']:.4f}, "
+                    f"gradient_norm: {epoch_metrics['gradient_norm']}"
                 )
 
             # Clear memory for next iteration
             self.memory.clear_memory()
+
+
+        # Extract metric names (keys) from the first entry
+        metrics = list(total_epoch_metrics[0].keys())
+        num_metrics = len(metrics)
+
+        # Create subplots
+        fig, axes = plt.subplots(num_metrics, 1, figsize=(10, 5 * num_metrics))
+
+        # Plot each metric
+        for i, metric in enumerate(metrics):
+            values = [entry[metric] for entry in total_epoch_metrics]
+            axes[i].plot(values, marker='o', linestyle='-')  # Plot with markers and lines
+            axes[i].set_title(f"{metric} over Steps")
+            axes[i].set_xlabel("Step")
+            axes[i].set_ylabel(metric)
+
+        plt.tight_layout()  # Adjust spacing
+        plt.show()
 
         print(f"Training completed. Total episodes: {total_episodes}")
         return self.actor, self.critic, self.reward_net
