@@ -23,7 +23,7 @@ env = gym.make(ENV_NAME)
 model = ActorNetwork(env.action_space.n, env.observation_space.shape[0])
 model.load_state_dict(torch.load(MODEL_PATH))
 partial_model = ActorNetwork(env.action_space.n, env.observation_space.shape[0])
-partial_model.load_state_dict(torch.load(MODEL_PATH))
+partial_model.load_state_dict(torch.load(PARTIAL_MODEL_PATH))
 
 
 print(f"Model loaded from {MODEL_PATH}")

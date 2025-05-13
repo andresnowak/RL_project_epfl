@@ -2,7 +2,7 @@ from copy import deepcopy
 from itertools import count
 from agents.ppo_discrete import *
 import gymnasium as gym
-from utils import plot_learning_curve
+from utils import plot_learning_curve, select_models_by_fraction
 
 ENV_NAME = "MountainCar-v0"
 
@@ -24,6 +24,9 @@ if __name__ == "__main__":
     avg_score = 0
     n_steps = 0
 
+    eval_interval = 1
+    eval_episodes = 10
+
     for i in range(n_episode):
         observation, _ = env.reset()
         done = False
@@ -44,30 +47,42 @@ if __name__ == "__main__":
                 print(f"episode {i} done... Score: {score}")
                 agent.learn()
                 learn_iters += 1
-                score_history.append(score)
-                avg_score = np.mean(score_history[-100:])
-                actor_model_history.append(deepcopy(agent.ppo_policy.actor.state_dict()))
-                critic_model_history.append(deepcopy(agent.ppo_policy.critic.state_dict()))
+                # score_history.append(score)
+                # avg_score = np.mean(score_history[-100:])
+                # actor_model_history.append(deepcopy(agent.ppo_policy.actor.state_dict()))
+                # critic_model_history.append(deepcopy(agent.ppo_policy.critic.state_dict()))
                 break
 
-        print("episode", i, "score %.1f" % score, "avg score %.1f" % avg_score, "time_steps", n_steps, "learning_steps", learn_iters)
+        print("episode", i, "score %.1f" % score, "time_steps", n_steps, "learning_steps", learn_iters)
+
+        # Eval
+        if i % eval_interval == 0 and i > 0:
+            eval_scores = []
+            for _ in range(eval_episodes):
+                obs, _ = env.reset()
+                done = False
+                ep_score = 0
+                while not done:
+                    with torch.no_grad():
+                        action, _, _ = agent.choose_action(obs)  # modify choose_action if needed
+                    obs, reward, terminated, truncated, _ = env.step(action)
+                    ep_score += reward
+                    done = terminated or truncated
+                eval_scores.append(ep_score)
+
+            mean_eval_score = np.mean(eval_scores)
+            score_history.append(mean_eval_score)
+            actor_model_history.append(deepcopy(agent.ppo_policy.actor.state_dict()))
+            critic_model_history.append(deepcopy(agent.ppo_policy.critic.state_dict()))
+    
+            print(f"[Evaluation @ Episode {i}] Avg Score over {eval_episodes} episodes: {mean_eval_score:.2f}")
+
     x = [i + 1 for i in range(len(score_history))]
     plot_learning_curve(x, score_history, "checkpoints/learning_curve_" + ENV_NAME + ".png")
 
     env.close()
 
-    # Get prefered model and half quality one
-    avg_score_history = np.zeros(len(score_history))
-    for i in range(len(score_history)):
-        avg_score_history[i] = np.mean(score_history[max(0, i - 100) : (i + 1)])
-    avg_score_history = avg_score_history.tolist()
-    best_idx = avg_score_history.index(max(avg_score_history))
-    best_actor_model = actor_model_history[best_idx]
-    best_critic_model = critic_model_history[best_idx]
-
-    half_idx = min(range(len(avg_score_history)), key=lambda i: abs(avg_score_history[i] - avg_score_history[best_idx] * 3) + abs(score_history[i] - score_history[best_idx] * 3))
-    half_actor_model = actor_model_history[half_idx]
-    half_critic_model = critic_model_history[half_idx]
+    best_actor_model, best_critic_model, half_actor_model, half_critic_model, best_idx, half_idx = select_models_by_fraction(score_history, actor_model_history, critic_model_history, performance_fraction=0.5, window_size=1)
 
     # save actor model
     print("save best model with score of", score_history[best_idx])
