@@ -13,9 +13,8 @@ print("--- Running Example ---")
 ENV_NAME = "Acrobot-v1"
 MODEL_PATH = "checkpoints/best_actor_model_" + ENV_NAME  # Use Continuous version
 PARTIAL_MODEL_PATH = "checkpoints/half_actor_model_" + ENV_NAME  # Use Continuous version
-# CSV_FILE = "ppo_cartpole_rollouts.csv"
 DIR_NAME = "rollouts"
-NUM_EPISODES = 100
+NUM_EPISODES = 1000
 DETERMINISTIC_ROLLOUT = False  # Use stochastic actions for variety
 
 

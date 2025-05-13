@@ -227,7 +227,7 @@ def collect_paired_demonstrations_mountaincar(
     trajectories_df = {}
 
     for model_name, model in zip(model_names, models):
-        csv_path = os.path.join(output_dir, f"{model_name}_model_trajectories_MountainCar-v0.csv")
+        csv_path = os.path.join(output_dir, f"{model_name}_model_trajectories_{env.spec.id}.csv")
         print(f"\nCollecting data from {model_name} model...")
 
         all_steps_data = []  # Accumulate all steps for this model
@@ -284,8 +284,7 @@ def collect_paired_demonstrations_mountaincar(
                     print("Skipping rest of episode due to step error.")
                     continue  # Skip adding this problematic step
 
-                done = terminated
-                # done = terminated
+                done = terminated or truncated
                 episode_rewards += reward
                 step_in_episode += 1
 
@@ -349,7 +348,7 @@ def collect_paired_demonstrations_mountaincar(
     # --- Step 2: Create preference pairs ---
     # Pass the collected summaries to the pairing function
     pairs_df = create_paired_demonstrations(trajectories_df)
-    pairs_df.to_csv(os.path.join(output_dir, "preference_pairs_MountainCar-v0.csv"))
+    pairs_df.to_csv(os.path.join(output_dir, f"preference_pairs_{env.spec.id}.csv"))
     print("Saved preference pairs")
 
 
