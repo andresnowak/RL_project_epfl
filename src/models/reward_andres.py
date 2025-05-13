@@ -2,6 +2,7 @@ import torch.nn as nn
 import torch
 import numpy as np
 import torch.nn.functional as F
+from typing import List, Optional
 
 from data.trajectory import Trajectory
 
@@ -11,19 +12,44 @@ class RewardModel(nn.Module):
     Given an state, this network outputs the reward.
     """
 
-    def __init__(self, state_dim: int, action_dim: int | None = None, hidden_dim: int = 128, device = "cpu"):
+    def __init__(
+        self,
+        state_dim: int,
+        action_dim: Optional[int] = None,
+        hidden_dims: List[int] = [128, 256, 128],
+        device: str = "cpu",
+    ):
         super().__init__()
         self.device = device
+        self.state_dim = state_dim
         self.action_dim = action_dim
+        self.use_actions = action_dim is not None
 
-        self.reward_net = nn.Sequential(
-            nn.Linear(state_dim + action_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, 1),
-            nn.Tanh(),
-        )
+        # Validate dimensions
+        if not hidden_dims:
+            raise ValueError("hidden_dims cannot be empty")
+
+        # Get activation functions
+        activation_fn = nn.ReLU()
+        output_activation_fn = nn.Tanh()
+
+        # Calculate input dimension
+        input_dim = state_dim + (action_dim if self.use_actions else 0)
+
+        # Build network layers dynamically
+        layers = []
+        current_dim = input_dim
+
+        for hidden_dim in hidden_dims:
+            layers.extend([nn.Linear(current_dim, hidden_dim), activation_fn])
+            current_dim = hidden_dim
+
+        # Final output layer
+        layers.append(nn.Linear(current_dim, 1))
+        if output_activation_fn:
+            layers.append(output_activation_fn)
+
+        self.reward_net = nn.Sequential(*layers).to(device)
 
     def forward(self, state, action):
         # assume `action` is already a one-hot or float tensor of shape (batch, action_dim)

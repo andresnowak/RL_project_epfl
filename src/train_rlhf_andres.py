@@ -8,7 +8,7 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 import os
 
-ENV_NAME = "CartPole-v1"
+ENV_NAME = "Acrobot-v1"
 
 
 def load_trajectories(data_dir):
@@ -78,8 +78,8 @@ def evaluate_policy(agent, env, num_episodes=10):
 
         while not done:
             with torch.no_grad():
-                state_tensor = torch.tensor(state, dtype=torch.float32)
-                action = agent.actor(state_tensor).sample().numpy()
+                state_tensor = torch.tensor(state, dtype=torch.float32).to(agent.device)
+                action = agent.actor(state_tensor).sample().cpu().numpy()
 
             next_state, reward, done, truncated, _ = env.step(action)
             done = done or truncated
@@ -138,13 +138,13 @@ if __name__ == "__main__":
     )
 
     env = gym.make(ENV_NAME)
-    agent = PPORLHFAgent(env, "cpu", f"../checkpoints_2/half_actor_model_{ENV_NAME}", n_epochs=10, entropy_coef=0.001)
+    agent = PPORLHFAgent(env, "cpu", f"../checkpoints_2/half_actor_model_{ENV_NAME}", n_epochs=10, entropy_coef=0.001, lr_reward=1e-3)
 
     # ========== BEFORE TRAINING ==========
     print("\n=== Pre-Training Evaluation ===")
     
     # Evaluate policy
-    pre_train_reward = evaluate_policy(agent, env, 20)
+    pre_train_reward = evaluate_policy(agent, env, 50)
     
     # Visualize
     record_env = gym.make(ENV_NAME, render_mode="rgb_array")
@@ -153,16 +153,19 @@ if __name__ == "__main__":
 
     # ========== TRAINING ==========
     print("\n=== Training ===")
-    agent.train(100, preferences=preferences)
+    agent.train_reward_model(train_prefs, val_prefs, n_epochs=100, batch_size=128, eval_callback=evaluate_reward_model)
+    evaluate_reward_model(agent, val_prefs)  # Evaluate on held-out validation set
+    # exit()
+
+    agent.train(100)
 
     # ========== AFTER TRAINING ==========
     print("\n=== Post-Training Evaluation ===")
 
     print("\nReward Model (After Training):")
-    evaluate_reward_model(agent, val_prefs)  # Evaluate on held-out validation set
     
     # Evaluate policy
-    post_train_reward = evaluate_policy(agent, env, 20)
+    post_train_reward = evaluate_policy(agent, env, 50)
     
     # Visualize
     record_env = gym.make(ENV_NAME, render_mode="rgb_array")

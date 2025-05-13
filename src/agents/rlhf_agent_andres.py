@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from tqdm import tqdm
 import numpy as np
 import random
-from models.ppo_policy import ActorNetwork, CriticNetwork
+from models.ppo_policy_andres import ActorNetwork, CriticNetwork
 from models.reward_andres import RewardModel
 from torch.utils.data import BatchSampler, SubsetRandomSampler
 import gymnasium as gym
@@ -81,7 +81,7 @@ class PPORLHFAgent:
         seed=42,
         max_steps_per_episode=1_000,
         n_epochs=4,
-        entropy_coef=0.01,
+        entropy_coef=0.001,
         value_coef=0.5,
         max_grad_norm=0.5,
     ):
@@ -114,7 +114,6 @@ class PPORLHFAgent:
         self.reward_net = RewardModel(
             state_dim=self.state_dim,
             action_dim=self.action_dim,
-            hidden_dim=256,
             device=device,
         ).to(device)
 
@@ -189,8 +188,9 @@ class PPORLHFAgent:
             returns[t] = advantages[t] + values[t]
 
         return advantages, returns
-
-    def train_reward_model(self, preferences, n_epochs, batch_size):
+    
+    # ---- REWARD MODEL -----
+    def train_reward_model(self, preferences, val_preferences, n_epochs, batch_size, eval_iters=10, eval_callback = None):
         """Train the reward model on preference data"""
         self.reward_net.train()
         random.seed(self.seed)
@@ -236,6 +236,12 @@ class PPORLHFAgent:
                 epoch_loss += loss.item()
 
             print(f"Epoch {epoch + 1}/{n_epochs}, Loss: {epoch_loss:.4f}")
+
+            if epoch % eval_iters == 0:
+                with torch.no_grad():
+                    if eval_callback != None:
+                        eval_callback(self, val_preferences)
+
 
     def actor_loss(self, states, actions, old_log_probs, advantages):
         """Compute PPO actor loss"""
@@ -332,12 +338,11 @@ class PPORLHFAgent:
             "gradient_norm": total_norm,
         }
 
-    def train(self, num_episodes: int, preferences=None):
+    def train(self, num_episodes: int):
         """Main training loop"""
         # Train reward model if preferences are provided
-        if preferences:
-            self.train_reward_model(preferences, n_epochs=100, batch_size=128)
-            self.reward_net.eval()  # Set reward model to evaluation mode
+ 
+        self.reward_net.eval()  # Set reward model to evaluation mode
 
         episode_counter = 0
         total_episodes = 0
