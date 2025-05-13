@@ -38,4 +38,4 @@ class RewardModel(nn.Module):
         states = trajectory.states.to(self.device)
         actions = trajectory.actions.to(self.device)
         rewards = self.forward(states, actions)
-        return rewards.mean()
+        return rewards.sum()

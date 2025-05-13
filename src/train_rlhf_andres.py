@@ -76,7 +76,8 @@ def evaluate_policy(agent, env, num_episodes=10):
                 state_tensor = torch.tensor(state, dtype=torch.float32)
                 action = agent.actor(state_tensor).sample().numpy()
 
-            next_state, reward, done, _, _ = env.step(action)
+            next_state, reward, done, truncated, _ = env.step(action)
+            done = done or truncated
             episode_reward += reward
             state = next_state
 

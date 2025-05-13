@@ -71,7 +71,9 @@ class PPORLHFAgent:
         env: gym.Env,
         device,
         actor_model_path: str,
-        lr=0.001,
+        lr_reward=0.001,
+        lr_actor=1e-4,
+        lr_critic=1e-3,
         gamma=0.99,
         clip_epsilon=0.2,
         beta=0.01,
@@ -117,14 +119,15 @@ class PPORLHFAgent:
         ).to(device)
 
         # Initialize optimizers
-        self.reward_optimizer = torch.optim.Adam(self.reward_net.parameters(), lr=lr)
-        self.ppo_optimizer = torch.optim.Adam(
-            [{"params": self.actor.parameters()}, {"params": self.critic.parameters()}],
-            lr=lr,
-        )
+        self.reward_optimizer = torch.optim.Adam(self.reward_net.parameters(), lr=lr_reward)
+
+        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=lr_actor)
+        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=lr_critic)
 
         # Hyperparameters
-        self.lr = lr
+        self.lr_actor = lr_actor
+        self.lr_critic = lr_critic
+        self.lr_reward = lr_reward
         self.gamma = gamma
         self.clip_epsilon = clip_epsilon
         self.beta = beta
@@ -309,14 +312,16 @@ class PPORLHFAgent:
         total_norm = total_norm ** 0.5
 
         # Optimization step
-        self.ppo_optimizer.zero_grad()
+        self.actor_optimizer.zero_grad()
+        self.critic_optimizer.zero_grad()
         total_loss.backward()
 
         # Clip gradients to prevent large updates
         torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
         torch.nn.utils.clip_grad_norm_(self.critic.parameters(), self.max_grad_norm)
 
-        self.ppo_optimizer.step()
+        self.actor_optimizer.step()
+        self.critic_optimizer.step()
 
         return {
             "total_loss": total_loss.item(),
@@ -331,7 +336,7 @@ class PPORLHFAgent:
         """Main training loop"""
         # Train reward model if preferences are provided
         if preferences:
-            self.train_reward_model(preferences, n_epochs=200, batch_size=128)
+            self.train_reward_model(preferences, n_epochs=100, batch_size=128)
             self.reward_net.eval()  # Set reward model to evaluation mode
 
         episode_counter = 0
