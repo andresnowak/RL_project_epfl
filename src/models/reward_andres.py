@@ -16,7 +16,7 @@ class RewardModel(nn.Module):
         self,
         state_dim: int,
         action_dim: Optional[int] = None,
-        hidden_dims: List[int] = [128, 256, 128],
+        hidden_dims: List[int] = [64, 64],
         device: str = "cpu",
     ):
         super().__init__()
@@ -46,8 +46,8 @@ class RewardModel(nn.Module):
 
         # Final output layer
         layers.append(nn.Linear(current_dim, 1))
-        if output_activation_fn:
-            layers.append(output_activation_fn)
+        # if output_activation_fn:
+        #     layers.append(output_activation_fn)
 
         self.reward_net = nn.Sequential(*layers).to(device)
 

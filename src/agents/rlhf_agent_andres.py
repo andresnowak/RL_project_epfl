@@ -21,48 +21,85 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 
 
-class PPOMemory:
+class PPOTrajectoryMemory:
     def __init__(self, batch_size):
-        self.states = []
-        self.probs = []
-        self.vals = []
-        self.actions = []
-        self.rewards = []
-        self.dones = []
+        self.trajectories = []  # Store complete trajectories
         self.batch_size = batch_size
 
     def generate_batches(self):
-        n_states = len(self.states)
+        n_trajectories = len(self.trajectories)
         batch_indices = BatchSampler(
-            SubsetRandomSampler(range(n_states)), self.batch_size, drop_last=False
+            SubsetRandomSampler(range(n_trajectories)), self.batch_size, drop_last=False
         )
         return batch_indices
 
-    def get_memory(self):
-        return (
-            np.array(self.states),
-            np.array(self.actions),
-            np.array(self.probs),
-            np.array(self.vals),
-            np.array(self.rewards),
-            np.array(self.dones),
-        )
+    def store_trajectory(self, trajectory):
+        """Store a complete trajectory"""
+        self.trajectories.append(trajectory)
 
-    def store_memory(self, state, action, probs, vals, reward, done):
-        self.states.append(state)
-        self.actions.append(action)
-        self.probs.append(probs)
-        self.vals.append(vals)
-        self.rewards.append(reward)
-        self.dones.append(done)
+    def get_memory(self):
+        """Return all stored trajectories"""
+        return self.trajectories
 
     def clear_memory(self):
+        """Clear all stored trajectories"""
+        self.trajectories = []
+
+
+class Trajectory:
+    """Class to store and process complete trajectories"""
+
+    def __init__(self):
         self.states = []
-        self.probs = []
         self.actions = []
+        self.log_probs = []
+        self.values = []
         self.rewards = []
         self.dones = []
-        self.vals = []
+        self.total_reward = 0  # For the whole trajectory
+        self.trajectory_return = 0  # Discounted return
+
+    def add_step(self, state, action, log_prob, value, reward, done):
+        """Add a step to the trajectory"""
+        self.states.append(state)
+        self.actions.append(action)
+        self.log_probs.append(log_prob)
+        self.values.append(value)
+        self.rewards.append(reward)
+        self.dones.append(done)
+        self.total_reward += reward
+
+    def finalize(self, gamma, last_value=0):
+        """Calculate returns and advantages for the trajectory"""
+        # Convert lists to numpy arrays for easier processing
+        self.states = np.array(self.states)
+        self.actions = np.array(self.actions)
+        self.log_probs = np.array(self.log_probs)
+        self.values = np.array(self.values)
+        self.rewards = np.array(self.rewards)
+        self.dones = np.array(self.dones)
+
+        # Calculate trajectory return (discounted)
+        returns = np.zeros_like(self.rewards)
+        advantages = np.zeros_like(self.rewards)
+
+        # Compute returns and advantages
+        next_value = last_value
+        next_advantage = 0
+
+        for t in reversed(range(len(self.rewards))):
+            # For returns
+            returns[t] = self.rewards[t] + gamma * next_value * (1 - self.dones[t])
+            next_value = returns[t]
+
+            # For advantages (simple version, could be replaced with GAE)
+            advantages[t] = returns[t] - self.values[t]
+
+        self.returns = returns
+        self.advantages = advantages
+        self.trajectory_return = returns[0] if len(returns) > 0 else 0
+
+        return self
 
 
 class PPORLHFAgent:
@@ -71,6 +108,7 @@ class PPORLHFAgent:
         env: gym.Env,
         device,
         actor_model_path: str,
+        reward_model_hidden_size = [128, 256, 128],
         lr_reward=0.001,
         lr_actor=1e-4,
         lr_critic=1e-4,
@@ -90,7 +128,9 @@ class PPORLHFAgent:
         self.env = env
         self.state_dim = env.observation_space.shape[0]
         self.action_dim = env.action_space.n  # Only for discrete env you use n
-        self.memory = PPOMemory(32)
+        self.memory = PPOTrajectoryMemory(
+            batch_size=4
+        )  # Using smaller batch size for trajectories
 
         # Initialize actor and move to device
         self.actor = ActorNetwork(
@@ -106,22 +146,28 @@ class PPORLHFAgent:
         # Frozen reference actor
         self.actor_ref = copy.deepcopy(self.actor)
         self.actor_ref.eval()
+        for param in self.actor_ref.parameters():
+            param.requires_grad = False  # Actual freezing
 
         # Initialize critic and move to device
         self.critic = CriticNetwork(self.state_dim, 0.5).to(self.device)
 
-        # Initialize reward model
+        # Initialize trajectory reward model
         self.reward_net = RewardModel(
             state_dim=self.state_dim,
             action_dim=self.action_dim,
+            hidden_dims=reward_model_hidden_size,
             device=device,
         ).to(device)
 
         # Initialize optimizers
-        self.reward_optimizer = torch.optim.Adam(self.reward_net.parameters(), lr=lr_reward)
-
-        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=lr_actor)
-        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=lr_critic)
+        self.reward_optimizer = torch.optim.Adam(
+            self.reward_net.parameters(), lr=lr_reward
+        )
+        self.actor_optimizer = torch.optim.AdamW(self.actor.parameters(), lr=lr_actor)
+        self.critic_optimizer = torch.optim.AdamW(
+            self.critic.parameters(), lr=lr_critic
+        )
 
         # Hyperparameters
         self.lr_actor = lr_actor
@@ -162,8 +208,8 @@ class PPORLHFAgent:
 
         return (action.cpu().item(), log_prob.cpu().item(), value.cpu().item())
 
-    def compute_advantages(self, rewards, values, dones, last_value=0):
-        """Compute advantages using GAE"""
+    def compute_gae(self, rewards, values, dones, last_value=0):
+        """Compute advantages using GAE (for trajectory-based advantages)"""
         advantages = np.zeros_like(rewards, dtype=np.float32)
         returns = np.zeros_like(rewards, dtype=np.float32)
         last_gae = 0
@@ -179,7 +225,6 @@ class PPORLHFAgent:
                 + self.gamma * values_extended[t + 1] * (1 - dones[t])
                 - values[t]
             )
-
             # GAE: delta + gamma * lambda * (1-done) * last_gae
             advantages[t] = delta + self.gamma * self.lam * (1 - dones[t]) * last_gae
             last_gae = advantages[t]
@@ -188,10 +233,18 @@ class PPORLHFAgent:
             returns[t] = advantages[t] + values[t]
 
         return advantages, returns
-    
+
     # ---- REWARD MODEL -----
-    def train_reward_model(self, preferences, val_preferences, n_epochs, batch_size, eval_iters=10, eval_callback = None):
-        """Train the reward model on preference data"""
+    def train_reward_model(
+        self,
+        preferences,
+        val_preferences,
+        n_epochs,
+        batch_size,
+        eval_iters=10,
+        eval_callback=None,
+    ):
+        """Train the reward model on preference data for complete trajectories"""
         self.reward_net.train()
         random.seed(self.seed)
         torch.manual_seed(self.seed)
@@ -211,6 +264,7 @@ class PPORLHFAgent:
 
                 # Process each preference pair
                 for chosen_trajectory, rejected_trajectory in batch:
+                    # Get rewards for complete trajectories
                     chosen_rewards.append(
                         self.reward_net.reward_trajectory(chosen_trajectory)
                     )
@@ -232,16 +286,32 @@ class PPORLHFAgent:
                     self.reward_net.parameters(), self.max_grad_norm
                 )
                 self.reward_optimizer.step()
-
                 epoch_loss += loss.item()
 
             print(f"Epoch {epoch + 1}/{n_epochs}, Loss: {epoch_loss:.4f}")
 
             if epoch % eval_iters == 0:
                 with torch.no_grad():
-                    if eval_callback != None:
+                    if eval_callback is not None:
                         eval_callback(self, val_preferences)
 
+    def evaluate_trajectory(self, trajectory):
+        """Evaluate a complete trajectory using the reward model"""
+        with torch.no_grad():
+            states = torch.tensor(np.array(trajectory.states), dtype=torch.float32).to(
+                self.device
+            )
+            actions = torch.tensor(np.array(trajectory.actions), dtype=torch.long).to(
+                self.device
+            )
+
+            # Get trajectory-level reward
+            # trajectory_reward = self.reward_net.reward_trajectory(
+            #     (states, actions)
+            # ).item()
+            trajectory_reward = self.reward_net.forward(state=states, action=actions).sum()
+
+            return trajectory_reward
 
     def actor_loss(self, states, actions, old_log_probs, advantages):
         """Compute PPO actor loss"""
@@ -294,57 +364,129 @@ class PPORLHFAgent:
 
         return value_loss
 
-    def update_policy(
-        self, states, actions, old_log_probs, old_values, advantages, returns
-    ):
-        """Update policy using PPO"""
+    def update_policy(self, trajectories):
+        """Update policy using PPO with trajectory data"""
+        all_states = []
+        all_actions = []
+        all_log_probs = []
+        all_values = []
+        all_advantages = []
+        all_returns = []
 
-        # Normalize advantages (helps with training stability)
+        # Flatten trajectories for batch processing
+        for trajectory in trajectories:
+            states = trajectory.states
+            actions = trajectory.actions
+            log_probs = trajectory.log_probs
+            values = trajectory.values
+            advantages = trajectory.advantages
+            returns = trajectory.returns
+
+            all_states.append(states)
+            all_actions.append(actions)
+            all_log_probs.append(log_probs)
+            all_values.append(values)
+            all_advantages.append(advantages)
+            all_returns.append(returns)
+
+        # Convert to tensors
+        states = torch.tensor(np.concatenate(all_states), dtype=torch.float32).to(
+            self.device
+        )
+        actions = torch.tensor(np.concatenate(all_actions), dtype=torch.long).to(
+            self.device
+        )
+        old_log_probs = torch.tensor(
+            np.concatenate(all_log_probs), dtype=torch.float32
+        ).to(self.device)
+        old_values = torch.tensor(np.concatenate(all_values), dtype=torch.float32).to(
+            self.device
+        )
+        advantages = torch.tensor(
+            np.concatenate(all_advantages), dtype=torch.float32
+        ).to(self.device)
+        returns = torch.tensor(np.concatenate(all_returns), dtype=torch.float32).to(
+            self.device
+        )
+
+        # Normalize advantages
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-        # Compute actor and critic losses
-        actor_total_loss, policy_loss, entropy, kl_div = self.actor_loss(
-            states, actions, old_log_probs, advantages
+        # Sample mini-batches
+        batch_size = min(
+            64, states.shape[0]
+        )  # Smaller batch size for potentially smaller dataset
+        indices = BatchSampler(
+            SubsetRandomSampler(range(states.shape[0])), batch_size, drop_last=False
         )
-        value_loss = self.critic_loss(states, old_values, returns)
 
-        # Combined loss
-        total_loss = actor_total_loss + self.value_coef * value_loss
-
-        total_norm = 0.0
-        for p in list(self.actor.parameters()) + list(self.critic.parameters()):
-            if p.grad is not None:
-                total_norm += p.grad.data.norm(2).item() ** 2
-        total_norm = total_norm ** 0.5
-
-        # Optimization step
-        self.actor_optimizer.zero_grad()
-        self.critic_optimizer.zero_grad()
-        total_loss.backward()
-
-        # Clip gradients to prevent large updates
-        torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
-        torch.nn.utils.clip_grad_norm_(self.critic.parameters(), self.max_grad_norm)
-
-        self.actor_optimizer.step()
-        self.critic_optimizer.step()
-
-        return {
-            "total_loss": total_loss.item(),
-            "policy_loss": policy_loss.item(),
-            "value_loss": value_loss.item(),
-            "entropy": entropy.item(),
-            "kl_div": kl_div.item(),
-            "gradient_norm": total_norm,
+        epoch_metrics = {
+            "total_loss": 0,
+            "policy_loss": 0,
+            "value_loss": 0,
+            "entropy": 0,
+            "kl_div": 0,
+            "gradient_norm": 0,
         }
 
-    def train(self, num_episodes: int):
-        """Main training loop"""
-        # Train reward model if preferences are provided
- 
-        self.reward_net.eval()  # Set reward model to evaluation mode
+        num_batches = 0
 
-        episode_counter = 0
+        # Update in mini-batches
+        for batch_indices in indices:
+            batch_states = states[batch_indices]
+            batch_actions = actions[batch_indices]
+            batch_old_log_probs = old_log_probs[batch_indices]
+            batch_old_values = old_values[batch_indices]
+            batch_advantages = advantages[batch_indices]
+            batch_returns = returns[batch_indices]
+
+            # Compute actor and critic losses
+            actor_total_loss, policy_loss, entropy, kl_div = self.actor_loss(
+                batch_states, batch_actions, batch_old_log_probs, batch_advantages
+            )
+            value_loss = self.critic_loss(batch_states, batch_old_values, batch_returns)
+
+            # Combined loss
+            total_loss = actor_total_loss + self.value_coef * value_loss
+
+            # Optimization step
+            self.actor_optimizer.zero_grad()
+            self.critic_optimizer.zero_grad()
+            total_loss.backward()
+
+            # Calculate gradient norm
+            total_norm = 0.0
+            for p in list(self.actor.parameters()) + list(self.critic.parameters()):
+                if p.grad is not None:
+                    total_norm += p.grad.data.norm(2).item() ** 2
+            total_norm = total_norm**0.5
+
+            # Clip gradients to prevent large updates
+            torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
+            torch.nn.utils.clip_grad_norm_(self.critic.parameters(), self.max_grad_norm)
+
+            self.actor_optimizer.step()
+            self.critic_optimizer.step()
+
+            # Accumulate metrics
+            epoch_metrics["total_loss"] += total_loss.item()
+            epoch_metrics["policy_loss"] += policy_loss.item()
+            epoch_metrics["value_loss"] += value_loss.item()
+            epoch_metrics["entropy"] += entropy.item()
+            epoch_metrics["kl_div"] += kl_div.item()
+            epoch_metrics["gradient_norm"] += total_norm
+
+            num_batches += 1
+
+        # Average metrics over batches
+        for key in epoch_metrics:
+            epoch_metrics[key] /= max(1, num_batches)
+
+        return epoch_metrics
+
+    def train(self, num_episodes: int):
+        """Main training loop with trajectory-based rewards"""
+        self.reward_net.eval()  # Set reward model to evaluation mode
         total_episodes = 0
         total_epoch_metrics = []
 
@@ -352,135 +494,93 @@ class PPORLHFAgent:
         for iteration in range(num_episodes):
             print(f"Starting iteration {iteration + 1}/{num_episodes}")
 
-            # Collect experience using current policy
-            state, _ = self.env.reset()
-            episode_reward = 0
-            episode_length = 0
-            done = False
+            # Collect multiple complete trajectories for this iteration
+            trajectories_this_iteration = []
+            episodes_this_iteration = 0
 
-            # Reset episode counter for this iteration
-            episode_counter = 0
+            # Collect a certain number of episodes/trajectories for this iteration
+            while episodes_this_iteration < 5:  # Collect 5 trajectories per iteration
+                # New trajectory
+                current_trajectory = Trajectory()
 
-            # Collect data for a fixed number of steps (or multiple episodes)
-            for step in range(self.max_steps_per_episode):
-                # Get action from policy
-                action, log_prob, value = self.get_action(state)
+                # Reset environment
+                state, _ = self.env.reset()
+                episode_length = 0
+                episode_reward = 0
+                done = False
 
-                # Take action in environment
-                next_state, env_reward, terminated, truncated, _ = self.env.step(action)
-                done = terminated or truncated
+                # Collect a single trajectory
+                while not done and episode_length < self.max_steps_per_episode:
+                    # Get action from policy
+                    action, log_prob, value = self.get_action(state)
 
-                # Get reward from reward model if available
-                if self.reward_net is not None:
+                    # Take action in environment
+                    next_state, env_reward, terminated, truncated, _ = self.env.step(
+                        action
+                    )
+                    done = terminated or truncated
+
+                    # Store step in current trajectory
+                    # Just store env_reward temporarily, we'll update with the trajectory reward later
+                    current_trajectory.add_step(
+                        state, action, log_prob, value, env_reward, done
+                    )
+
+                    # Update for next step
+                    state = next_state
+                    episode_reward += env_reward
+                    episode_length += 1
+
+                # Get value of last state for bootstrapping if not done
+                last_value = 0
+                if not done:
                     with torch.no_grad():
                         state_tensor = torch.tensor(state, dtype=torch.float32).to(
                             self.device
-                        ).unsqueeze(0)
-                        action_tensor = torch.tensor(action, dtype=torch.long).to(self.device)
+                        )
+                        last_value = self.critic(state_tensor).cpu().item()
 
-                        reward = self.reward_net(state_tensor, action_tensor).item()
-                else:
-                    reward = env_reward
+                # Finalize trajectory with computed returns and advantages
+                current_trajectory.finalize(self.gamma, last_value)
 
-                # Store experience
-                self.memory.store_memory(state, action, log_prob, value, reward, done)
+                # Evaluate entire trajectory with reward model
+                if self.reward_net is not None:
+                    trajectory_reward = self.evaluate_trajectory(current_trajectory)
 
-                episode_reward += reward
-                episode_length += 1
+                    # Scale the episode reward to distribute over steps
+                    if episode_length > 0:
+                        step_reward = trajectory_reward / episode_length
 
-                # If episode ended
-                if done:
-                    episode_counter += 1
-                    total_episodes += 1
-                    print(
-                        f"Episode {total_episodes}, Length: {episode_length}, Reward: {episode_reward:.4f}"
-                    )
+                        # Replace all step rewards with the trajectory-based reward
+                        current_trajectory.rewards = (
+                            torch.ones_like(torch.from_numpy(current_trajectory.rewards)) * step_reward
+                        )
 
-                    # Reset environment
-                    state, _ = self.env.reset()
-                    episode_reward = 0
-                    episode_length = 0
-                else:
-                    state = next_state
+                        # Recalculate returns and advantages with new rewards
+                        current_trajectory.finalize(self.gamma, last_value)
 
-                # If we've collected enough steps, break
-                if step >= self.max_steps_per_episode - 1:
-                    break
+                # Store the complete trajectory in memory
+                trajectories_this_iteration.append(current_trajectory)
 
-            # Get data from memory
-            states, actions, old_log_probs, old_values, rewards, dones = (
-                self.memory.get_memory()
-            )
+                episodes_this_iteration += 1
+                total_episodes += 1
+                print(
+                    f"Episode {total_episodes}, Length: {episode_length}, "
+                    f"Env Reward: {episode_reward:.4f}, "
+                    f"Trajectory Reward: {current_trajectory.trajectory_return:.4f}"
+                )
 
-            # Get value of last state for bootstrapping
-            if done:
-                last_value = 0
-            else:
-                with torch.no_grad():
-                    state_tensor = torch.tensor(state, dtype=torch.float32).to(
-                        self.device
-                    )
-                    last_value = self.critic(state_tensor).cpu().item()
+            # Now store all trajectories in memory
+            for trajectory in trajectories_this_iteration:
+                self.memory.store_trajectory(trajectory)
 
-            # Compute advantages and returns
-            advantages, returns = self.compute_advantages(
-                rewards, old_values, dones, last_value
-            )
+            # Get all trajectories for training
+            trajectories = self.memory.get_memory()
 
-            # Convert numpy arrays to tensors
-            states = torch.tensor(states, dtype=torch.float32).to(self.device)
-            actions = torch.tensor(actions, dtype=torch.long).to(self.device)
-            old_log_probs = torch.tensor(old_log_probs, dtype=torch.float32).to(
-                self.device
-            )
-            old_values = torch.tensor(old_values, dtype=torch.float32).to(self.device)
-            advantages = torch.tensor(advantages, dtype=torch.float32).to(self.device)
-            returns = torch.tensor(returns, dtype=torch.float32).to(self.device)
-
-
-            # Perform multiple epochs of mini-batch updates
+            # Perform multiple epochs of updates
             for epoch in range(self.n_epochs):
-                # Generate batches
-                batch_indices = self.memory.generate_batches()
-
-                # Initialize metrics for this epoch
-                epoch_metrics = {
-                    "total_loss": 0,
-                    "policy_loss": 0,
-                    "value_loss": 0,
-                    "entropy": 0,
-                    "kl_div": 0,
-                    "gradient_norm": 0,
-                }
-
-                # Update policy for each batch
-                for indices in batch_indices:
-                    batch_states = states[indices]
-                    batch_actions = actions[indices]
-                    batch_old_log_probs = old_log_probs[indices]
-                    batch_old_values = old_values[indices]
-                    batch_advantages = advantages[indices]
-                    batch_returns = returns[indices]
-
-                    # Update policy
-                    metrics = self.update_policy(
-                        batch_states,
-                        batch_actions,
-                        batch_old_log_probs,
-                        batch_old_values,
-                        batch_advantages,
-                        batch_returns,
-                    )
-
-                    # Accumulate metrics
-                    for key in epoch_metrics:
-                        epoch_metrics[key] += metrics[key]
-
-                # Average metrics over batches
-                num_batches = len(list(batch_indices))
-                for key in epoch_metrics:
-                    epoch_metrics[key] /= num_batches
-
+                # Update policy with all trajectories
+                epoch_metrics = self.update_policy(trajectories)
                 total_epoch_metrics.append(epoch_metrics)
 
                 # Log metrics
@@ -491,12 +591,11 @@ class PPORLHFAgent:
                     f"Value Loss: {epoch_metrics['value_loss']:.4f}, "
                     f"Entropy: {epoch_metrics['entropy']:.4f}, "
                     f"KL Div: {epoch_metrics['kl_div']:.4f}, "
-                    f"gradient_norm: {epoch_metrics['gradient_norm']}"
+                    f"gradient_norm: {epoch_metrics['gradient_norm']:.4f}"
                 )
 
             # Clear memory for next iteration
             self.memory.clear_memory()
-
 
         # Extract metric names (keys) from the first entry
         metrics = list(total_epoch_metrics[0].keys())
@@ -508,7 +607,9 @@ class PPORLHFAgent:
         # Plot each metric
         for i, metric in enumerate(metrics):
             values = [entry[metric] for entry in total_epoch_metrics]
-            axes[i].plot(values, marker='o', linestyle='-')  # Plot with markers and lines
+            axes[i].plot(
+                values, marker="o", linestyle="-"
+            )  # Plot with markers and lines
             axes[i].set_title(f"{metric} over Steps")
             axes[i].set_xlabel("Step")
             axes[i].set_ylabel(metric)
