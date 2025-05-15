@@ -243,7 +243,6 @@ class PPORLHFAgent:
         n_epochs,
         batch_size,
         eval_iters=10,
-        eval_callback=None,
     ):
         """Train the reward model on preference data for complete trajectories"""
         self.reward_net.train()
@@ -256,8 +255,12 @@ class PPORLHFAgent:
             for i in range(0, len(preferences), batch_size)
         ]
 
+        old_accuracy = 0
+        total_metrics = []
+
         # Train for n_epochs
-        for epoch in tqdm(range(n_epochs), desc="Training Reward Model"):
+        epoch_bar = tqdm(range(n_epochs), desc="Training Reward Model", unit="epoch")
+        for epoch in epoch_bar:
             epoch_loss = 0
             for batch in batches:
                 chosen_rewards = []
@@ -289,12 +292,45 @@ class PPORLHFAgent:
                 self.reward_optimizer.step()
                 epoch_loss += loss.item()
 
-            print(f"Epoch {epoch + 1}/{n_epochs}, Loss: {epoch_loss:.4f}")
-
             if epoch % eval_iters == 0:
                 with torch.no_grad():
-                    if eval_callback is not None:
-                        eval_callback(self, val_preferences)
+                    correct = 0
+                    total = 0
+
+                    for traj1, traj2 in val_preferences:
+                        # Convert to tensors and move to device
+                        states1 = traj1.states.to(self.device)
+                        actions1 = traj1.actions.to(self.device)
+                        states2 = traj2.states.to(self.device)
+                        actions2 = traj2.actions.to(self.device)
+
+                        # Compute rewards (handle variable lengths)
+                        with torch.no_grad():
+                            # NOTE: We compare with the sum (total reward trajectory) instead of the mean (individual of how good it rewards each step on the trajectory)
+
+                            # Option 1: Sum of rewards (for variable lengths)
+                            r1 = self.reward_net(states1, actions1 ).sum()  # Sum rewards along trajectory
+                            r2 = self.reward_net(states2, actions2).sum()
+
+                            # Option 2: Average reward (normalizes for length)
+                            # r1 = self.reward_net(states1, actions1).mean()
+                            # r2 = self.reward_net(states2, actions2).mean()
+
+                        # Compare rewards (assuming traj1 is the preferred one in the pair)
+                        if (r1 > r2).item():
+                            correct += 1
+                        total += 1
+
+                    accuracy = correct / total
+                    old_accuracy = accuracy
+            
+            total_metrics.append({"loss": epoch_loss, "Accuracy": old_accuracy})
+            epoch_bar.set_postfix(
+                {"loss": f"{epoch_loss:.4f}", "Accuracy": f"{old_accuracy:.2%}"}
+            )
+
+        return total_metrics
+        
 
     def evaluate_trajectory(self, trajectory):
         """Evaluate a complete trajectory using the reward model"""
@@ -306,11 +342,19 @@ class PPORLHFAgent:
                 self.device
             )
 
+            dist = self.actor(states) # Categorical dist of training policy (they return dist instead of logits the actors)
+            with torch.no_grad():
+                ref_dist = self.actor_ref(states) # Categorical dist of ref policy
+
+            kl_divergence = torch.distributions.kl.kl_divergence(dist, ref_dist)
+
             # Get trajectory-level reward
             # trajectory_reward = self.reward_net.reward_trajectory(
             #     (states, actions)
             # ).item()
-            trajectory_reward = self.reward_net.forward(state=states, action=actions).sum()
+
+            # NOTE: We apply the RLHF constraint to the reward, but we are doing reward_sum - kl_sum instead of E[reward] - E[kl], i don't know if it can be interpreted equally
+            trajectory_reward = self.reward_net.forward(state=states, action=actions).sum() - self.beta * kl_divergence.sum()
 
             return trajectory_reward
 
@@ -342,7 +386,7 @@ class PPORLHFAgent:
         kl_div = torch.distributions.kl.kl_divergence(dist, ref_dist).mean()
 
         # Total actor loss including entropy bonus and KL penalty
-        total_loss = policy_loss - self.entropy_coef * entropy + self.beta * kl_div
+        total_loss = policy_loss - self.entropy_coef * entropy # + self.beta * kl_div
 
         return total_loss, policy_loss, entropy, kl_div
 
@@ -485,7 +529,7 @@ class PPORLHFAgent:
 
         return epoch_metrics
 
-    def train(self, num_episodes: int):
+    def train(self, num_episodes: int, plot_metrics: bool = False):
         """Main training loop with trajectory-based rewards"""
         self.reward_net.eval()  # Set reward model to evaluation mode
         total_episodes = 0
@@ -602,21 +646,22 @@ class PPORLHFAgent:
         metrics = list(total_epoch_metrics[0].keys())
         num_metrics = len(metrics)
 
-        # Create subplots
-        fig, axes = plt.subplots(num_metrics, 1, figsize=(10, 5 * num_metrics))
+        if plot_metrics:
+            # Create subplots
+            fig, axes = plt.subplots(num_metrics, 1, figsize=(10, 5 * num_metrics))
 
-        # Plot each metric
-        for i, metric in enumerate(metrics):
-            values = [entry[metric] for entry in total_epoch_metrics]
-            axes[i].plot(
-                values, marker="o", linestyle="-"
-            )  # Plot with markers and lines
-            axes[i].set_title(f"{metric} over Steps")
-            axes[i].set_xlabel("Step")
-            axes[i].set_ylabel(metric)
+            # Plot each metric
+            for i, metric in enumerate(metrics):
+                values = [entry[metric] for entry in total_epoch_metrics]
+                axes[i].plot(
+                    values, marker="o", linestyle="-"
+                )  # Plot with markers and lines
+                axes[i].set_title(f"{metric} over Steps")
+                axes[i].set_xlabel("Step")
+                axes[i].set_ylabel(metric)
 
-        plt.tight_layout()  # Adjust spacing
-        plt.show()
+            plt.tight_layout()  # Adjust spacing
+            plt.show()
 
         print(f"Training completed. Total episodes: {total_episodes}")
-        return self.actor, self.critic, self.reward_net
+        return self.actor, self.critic, self.reward_net, total_epoch_metrics
