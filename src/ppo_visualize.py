@@ -16,10 +16,7 @@ if __name__ == "__main__":
     for _ in range(n_try):
         state, _ = env.reset()
         for _ in range(500):
-            state = torch.tensor(state, dtype=torch.float)
-            dist = actor(state)
-            action = dist.sample()
-            action = torch.squeeze(action).item()
+            action = actor.choose_action(state)
             state_, reward, done, truncated, _ = env.step(action)
             state = state_
             env.render()

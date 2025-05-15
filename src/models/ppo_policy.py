@@ -22,6 +22,13 @@ class ActorNetwork(nn.Module):
 
         return dist
 
+    def choose_action(self, state):
+        state = torch.tensor([state], dtype=torch.float)
+        dist = self.forward(state)
+        action = dist.sample()
+        action = torch.squeeze(action).item()
+        return action
+
 
 class CriticNetwork(nn.Module):
     def __init__(self, state_dim, fc_dims=256):
