@@ -11,3 +11,5 @@ ppo_mountain_car_continuous
 tmp
 *.DS_Store
 */videos_*
+checkpoints/DPO
+checkpoints/RLHF_PPO

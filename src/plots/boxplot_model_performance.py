@@ -1,24 +1,26 @@
 ### plot each model performance with box plot
 import os, sys
 import matplotlib.pyplot as plt
+import numpy as np
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 from src.models.ppo_policy import *
 
+# Env
+ENV_NAME = "CartPole-v1"
+ENV_NAME = "Acrobot-v1"
 COLOR_CODE = ["#FF0000", "#B51F1F", "#00A79F", "#007480", "#413D3A", "#CAC7C7"]
 
-if __name__ == "__main__":
-    # Env
-    ENV_NAME = "CartPole-v1"
-    # ENV_NAME = "Acrobot-v1"
-    env = gym.make(ENV_NAME)
+# PATH
+DIR = "../../checkpoints/"
+MODEL_BEST_PPO_PATH = DIR + "best_actor_model_" + ENV_NAME
+MODEL_HALF_PPO_PATH = DIR + "half_actor_model_" + ENV_NAME
+MODEL_DPO_PATH = DIR + "DPO/s2_K3000_" + ENV_NAME + ".pth"
+MODEL_RLHF_PPO_PATH = DIR + "RLHF_PPO/s2_K3000_" + ENV_NAME + ".pth"
 
-    # PATH
-    DIR = "../../checkpoints/"
-    MODEL_BEST_PPO_PATH = DIR + "best_actor_model_" + ENV_NAME
-    MODEL_HALF_PPO_PATH = DIR + "half_actor_model_" + ENV_NAME
-    # MODEL_DPO_PATH =
-    # MODEL_RLHF_PPO_PATH =
+if __name__ == "__main__":
+
+    env = gym.make(ENV_NAME)
 
     # Best model from PPO
     model_best_PPO = ActorNetwork(env.action_space.n, env.observation_space.shape[0])
@@ -26,21 +28,24 @@ if __name__ == "__main__":
     # Half model from PPO
     model_half_PPO = ActorNetwork(env.action_space.n, env.observation_space.shape[0])
     model_half_PPO.load_state_dict(torch.load(MODEL_HALF_PPO_PATH))
-    # # Best DPO
-    # model_DPO =
-    # # Best RLHF-PPO
-    # model_RLHF_PPO =
+    # Best DPO
+    model_DPO = ActorNetwork(env.action_space.n, env.observation_space.shape[0])
+    model_DPO.load_state_dict(torch.load(MODEL_DPO_PATH, map_location=torch.device("cpu")))
+    # Best RLHF-PPO
+    model_RLHF_PPO = ActorNetwork(env.action_space.n, env.observation_space.shape[0])
+    temp_model = torch.load(MODEL_RLHF_PPO_PATH)
+    model_RLHF_PPO.load_state_dict(temp_model["../RLHF_models/" + ENV_NAME + "/policy"])
 
-    model_list = [model_half_PPO, model_best_PPO]
-    model_name_list = ["half PPO", "best PPO"]
+    model_list = [model_half_PPO, model_best_PPO, model_DPO, model_RLHF_PPO]
+    model_name_list = ["Reference Policy", "Best Policy", "DPO", "RLHF_PPO"]
 
     # Parameters
-    n_episode = 10
+    n_episode = 500
 
     # for plot
     plt.figure(figsize=(8, 6))
 
-    # Run 10 episodes for each model
+    # Run n_episode episodes for each model
     for i, (model, model_name) in enumerate(zip(model_list, model_name_list)):
         print("Start: ", model_name)
         model_score_list = []
@@ -65,14 +70,15 @@ if __name__ == "__main__":
             medianprops=dict(color=COLOR_CODE[4], linewidth=2),  # Median line
             whiskerprops=dict(color=COLOR_CODE[4], linewidth=1.5),  # Whiskers
             capprops=dict(color=COLOR_CODE[4], linewidth=1.5),  # Caps
-            flierprops=dict(marker="o", color=COLOR_CODE[1], markeredgecolor=COLOR_CODE[1]),  # Outliers
+            flierprops=dict(marker="d", color=COLOR_CODE[i], markeredgecolor=COLOR_CODE[i]),  # Outliers
         )
+        print("Mean: ", np.array(model_score_list).mean())
 
 # Customizing the plot
-plt.title("Box Plot Example")
+plt.title(f"The model performance over {n_episode} episodes, {ENV_NAME}")
 plt.xlabel("Models")
 plt.ylabel("Rewards")
 plt.xticks([i + 1 for i in range(len(model_name_list))], model_name_list)
 
-# Displaying the plot
-plt.show()
+# save plots
+plt.savefig("../../plots/boxplots_" + ENV_NAME + ".pdf")
