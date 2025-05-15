@@ -7,7 +7,7 @@ from src.models.ppo_policy import *
 
 # Env
 ENV_NAME = "CartPole-v1"
-ENV_NAME = "Acrobot-v1"
+# ENV_NAME = "Acrobot-v1"
 COLOR_CODE = ["#FF0000", "#B51F1F", "#00A79F", "#007480", "#413D3A", "#CAC7C7"]
 
 # PATH
@@ -84,7 +84,7 @@ if __name__ == "__main__":
 plt.xticks(np.arange(len(ks)), ks)
 
 if ENV_NAME == "CartPole-v1":
-    plt.ylim(300, 500)
+    plt.ylim(350, 500)
 elif ENV_NAME == "Acrobot-v1":
     plt.ylim(-140, -90)
 plt.legend()
