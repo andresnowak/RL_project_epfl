@@ -9,3 +9,5 @@ build
 .DS_Store
 ppo_mountain_car_continuous
 tmp
+*.DS_Store
+*/videos_*
