@@ -148,7 +148,7 @@ if __name__ == "__main__":
     
     # Visualize
     record_env = gym.make(ENV_NAME, render_mode="rgb_array")
-    record_env = gym.wrappers.RecordVideo(record_env, "videos_before_training/")
+    record_env = gym.wrappers.RecordVideo(record_env, f"videos_before_training_{ENV_NAME}/")
     visualize_policy(agent.actor, record_env, 3)
 
     # ========== TRAINING ==========
@@ -169,7 +169,7 @@ if __name__ == "__main__":
     
     # Visualize
     record_env = gym.make(ENV_NAME, render_mode="rgb_array")
-    record_env = gym.wrappers.RecordVideo(record_env, "videos_after_training/")
+    record_env = gym.wrappers.RecordVideo(record_env, f"videos_after_training_{ENV_NAME}/")
     visualize_policy(agent.actor, record_env, 3)
 
     print(f"\nImprovement: {post_train_reward - pre_train_reward:.2f}")
