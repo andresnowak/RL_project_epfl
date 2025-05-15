@@ -14,7 +14,7 @@ ENV_NAME = "CartPole-v1"
 MODEL_PATH = "checkpoints/best_actor_model_" + ENV_NAME  # Use Continuous version
 PARTIAL_MODEL_PATH = "checkpoints/half_actor_model_" + ENV_NAME  # Use Continuous version
 DIR_NAME = "rollouts"
-NUM_EPISODES = 1000
+NUM_EPISODES = 5000
 DETERMINISTIC_ROLLOUT = False  # Use stochastic actions for variety
 
 
