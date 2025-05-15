@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 from src.models.ppo_policy import *
 
+COLOR_CODE = ["#FF0000", "#B51F1F", "#00A79F", "#007480", "#413D3A", "#CAC7C7"]
 
 if __name__ == "__main__":
     # Env
@@ -56,7 +57,16 @@ if __name__ == "__main__":
             model_score_list.append(episode_score)
 
         # boxplot
-        plt.boxplot(model_score_list, positions=[i + 1], patch_artist=True, boxprops=dict(facecolor="skyblue", color="blue"), medianprops=dict(color="red", linewidth=2))
+        plt.boxplot(
+            model_score_list,
+            positions=[i + 1],
+            patch_artist=True,
+            boxprops=dict(facecolor=COLOR_CODE[i], color=COLOR_CODE[4]),  # Box face and edge
+            medianprops=dict(color=COLOR_CODE[4], linewidth=2),  # Median line
+            whiskerprops=dict(color=COLOR_CODE[4], linewidth=1.5),  # Whiskers
+            capprops=dict(color=COLOR_CODE[4], linewidth=1.5),  # Caps
+            flierprops=dict(marker="o", color=COLOR_CODE[1], markeredgecolor=COLOR_CODE[1]),  # Outliers
+        )
 
 # Customizing the plot
 plt.title("Box Plot Example")
