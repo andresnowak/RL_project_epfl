@@ -8,7 +8,7 @@ from src.models.ppo_policy import *
 # Env
 ENV_NAME = "CartPole-v1"
 ENV_NAME = "Acrobot-v1"
-ENV_NAME = "LunarLander-v3"
+# ENV_NAME = "LunarLander-v3"
 COLOR_CODE = ["#FF0000", "#B51F1F", "#00A79F", "#007480", "#413D3A", "#CAC7C7"]
 
 # PATH
@@ -69,12 +69,13 @@ if __name__ == "__main__":
     for k in ks:
         k_score_buffer = []
         for s in range(n_seed):
+            temp_model = torch.load(DIR + model_name + "/s" + str(s) + "_K" + str(k) + "_" + ENV_NAME + ".pth", map_location=torch.device("cpu"))
             if ENV_NAME == "LunarLander-v3":
                 model = ActorNetwork_Lunar(env.action_space.n, env.observation_space.shape[0], [256, 256, 256])
-                model.load_state_dict(torch.load(DIR + model_name + "/s" + str(s) + "_K" + str(k) + "_" + ENV_NAME + ".pth", map_location=torch.device("cpu")))
+                model.load_state_dict(temp_model)
             else:
                 model = ActorNetwork(env.action_space.n, env.observation_space.shape[0])
-                model.load_state_dict(torch.load(DIR + model_name + "/s" + str(s) + "_K" + str(k) + "_" + ENV_NAME + ".pth", map_location=torch.device("cpu")))
+                model.load_state_dict(temp_model)
 
             episode_score_buffer = []
             for _ in range(n_episode):
@@ -137,7 +138,7 @@ if __name__ == "__main__":
     elif ENV_NAME == "Acrobot-v1":
         plt.ylim(-500, 0)
     elif ENV_NAME == "LunarLander-v3":
-        # plt.ylim(-500, 0)
+        plt.ylim(-400, 0)
         pass
     plt.legend()
     plt.xlabel("k")

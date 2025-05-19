@@ -14,4 +14,5 @@ tmp
 checkpoints/DPO
 checkpoints/RLHF_PPO
 checkpoints/RLHF_PPO_old
+checkpoints/DPO_old
 videos
