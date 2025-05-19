@@ -7,16 +7,17 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")
 from src.models.ppo_policy import *
 
 # Env
-ENV_NAME = "CartPole-v1"
+# ENV_NAME = "CartPole-v1"
 ENV_NAME = "Acrobot-v1"
+
 COLOR_CODE = ["#FF0000", "#B51F1F", "#00A79F", "#007480", "#413D3A", "#CAC7C7"]
 
 # PATH
 DIR = "../../checkpoints/"
 MODEL_BEST_PPO_PATH = DIR + "best_actor_model_" + ENV_NAME
 MODEL_HALF_PPO_PATH = DIR + "half_actor_model_" + ENV_NAME
-MODEL_DPO_PATH = DIR + "DPO/s2_K3000_" + ENV_NAME + ".pth"
-MODEL_RLHF_PPO_PATH = DIR + "RLHF_PPO/s2_K3000_" + ENV_NAME + ".pth"
+MODEL_DPO_PATH = DIR + "DPO/s2_K2000_" + ENV_NAME + ".pth"
+MODEL_RLHF_PPO_PATH = DIR + "RLHF_PPO/s2_K500_" + ENV_NAME + ".pth"
 
 if __name__ == "__main__":
 
@@ -40,10 +41,11 @@ if __name__ == "__main__":
     model_name_list = ["Reference Policy", "Best Policy", "DPO", "RLHF_PPO"]
 
     # Parameters
-    n_episode = 500
+    n_episode = 10
 
     # for plot
     plt.figure(figsize=(8, 6))
+    plt.rcParams.update({"font.size": 14})
 
     # Run n_episode episodes for each model
     for i, (model, model_name) in enumerate(zip(model_list, model_name_list)):
@@ -79,6 +81,7 @@ plt.title(f"The model performance over {n_episode} episodes, {ENV_NAME}")
 plt.xlabel("Models")
 plt.ylabel("Rewards")
 plt.xticks([i + 1 for i in range(len(model_name_list))], model_name_list)
+
 
 # save plots
 plt.savefig("../../plots/boxplots_" + ENV_NAME + ".pdf")
