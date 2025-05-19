@@ -7,8 +7,8 @@ from src.models.ppo_policy import *
 
 # Env
 ENV_NAME = "CartPole-v1"
-ENV_NAME = "Acrobot-v1"
-# ENV_NAME = "LunarLander-v3"
+# ENV_NAME = "Acrobot-v1"
+ENV_NAME = "LunarLander-v3"
 COLOR_CODE = ["#FF0000", "#B51F1F", "#00A79F", "#007480", "#413D3A", "#CAC7C7"]
 
 # PATH
@@ -16,7 +16,7 @@ DIR = "../../checkpoints/"
 
 model_name_list = ["DPO", "RLHF_PPO"]
 # model_name_list = ["RLHF_PPO"]
-ks = [20, 30, 50, 100, 500, 1000, 2000, 3000]
+ks = [30, 50, 100, 500, 1000, 2000, 3000]
 
 
 class ActorNetwork_Lunar(nn.Module):
@@ -54,7 +54,7 @@ if __name__ == "__main__":
     env = gym.make(ENV_NAME)
 
     # Parameters
-    n_episode = 100
+    n_episode = 20
     n_seed = 3
 
     # for plot
@@ -134,11 +134,13 @@ if __name__ == "__main__":
     plt.xticks(np.arange(len(ks)), ks)
 
     if ENV_NAME == "CartPole-v1":
-        plt.ylim(0, 500)
+        # plt.ylim(0, 500)
+        pass
     elif ENV_NAME == "Acrobot-v1":
-        plt.ylim(-500, 0)
+        # plt.ylim(-500, 0)
+        pass
     elif ENV_NAME == "LunarLander-v3":
-        plt.ylim(-400, 0)
+        plt.ylim(-600, 0)
         pass
     plt.legend()
     plt.xlabel("k")

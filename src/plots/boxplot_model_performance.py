@@ -8,16 +8,16 @@ from src.models.ppo_policy import *
 from model_performance_over_k import ActorNetwork_Lunar
 
 # Env
-# ENV_NAME = "CartPole-v1"
-ENV_NAME = "Acrobot-v1"
-# ENV_NAME = "LunarLander-v3"
+ENV_NAME = "CartPole-v1"
+# ENV_NAME = "Acrobot-v1"
+ENV_NAME = "LunarLander-v3"
 COLOR_CODE = ["#FF0000", "#B51F1F", "#00A79F", "#007480", "#413D3A", "#CAC7C7"]
 
 # PATH
 DIR = "../../checkpoints/"
 MODEL_BEST_PPO_PATH = DIR + "best_actor_model_" + ENV_NAME
 MODEL_HALF_PPO_PATH = DIR + "half_actor_model_" + ENV_NAME
-MODEL_DPO_PATH = DIR + "DPO/s2_K3000_" + ENV_NAME + ".pth"
+MODEL_DPO_PATH = DIR + "DPO/s2_K1000_" + ENV_NAME + ".pth"
 MODEL_RLHF_PPO_PATH = DIR + "RLHF_PPO/s2_K3000_" + ENV_NAME + ".pth"
 
 if __name__ == "__main__":
@@ -60,7 +60,7 @@ if __name__ == "__main__":
     model_name_list = ["Reference Policy", "Best Policy", "DPO", "RLHF_PPO"]
 
     # Parameters
-    n_episode = 50
+    n_episode = 10
 
     # for plot
     plt.figure(figsize=(8, 6))
